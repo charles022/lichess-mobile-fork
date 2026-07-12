@@ -33,9 +33,11 @@
   <string name="privateWillNeverBeShown">Privat. Wird nie außerhalb der Klasse angezeigt. Hilft dir, dich zu erinnern, wer der Schüler ist.</string>
   <string name="addStudent">Schüler hinzufügen</string>
   <string name="lichessProfileXCreatedForY">Lichess-Profil %1$s erstellt für %2$s.</string>
-  <string name="studentCredentials">Schüler: %1$s
+  <string name="studentCredentials">
+Schüler: %1$s
 Benutzername: %2$s
-Passwort: %3$s</string>
+Passwort: %3$s
+</string>
   <string name="inviteALichessAccount">Einen Lichess-Nutzer einladen</string>
   <string name="inviteDesc1">Falls der Schüler bereits ein Lichess-Konto besitzt, kannst du ihn zur Klasse hinzufügen.</string>
   <string name="inviteDesc2">Er wird eine Nachricht mit einem Link zum Beitreten auf Lichess erhalten.</string>

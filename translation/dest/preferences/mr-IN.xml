@@ -88,4 +88,5 @@
   <string name="boardSettings">पट</string>
   <string name="analysisSettings">विशलेषण प्राधान्ये</string>
   <string name="maneuverArrowsHelp">एका सोंगट्यासाठी डावयंत्राचे डावक्रम</string>
+  <string name="hoverOverSettingLabelsForHelp" comment="Instruction/guidance, explaining that hovering offer settings labels will show more information.&#10;&#10;Appears in the popover for &quot;Settings&quot; on game analysis for individual games.">समर्थनासाठी प्राधान्य शिक्कांवर द्विधा अवस्थेत राहा</string>
 </resources>

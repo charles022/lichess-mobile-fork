@@ -35,7 +35,8 @@
   <string name="celebratedPatrons">Οι διάσημοι Υποστηρικτές που έκαναν το Lichess πραγματικότητα</string>
   <string name="whereMoneyGoes">Που πηγαίνουν τα χρήματα;</string>
   <string name="serversAndDeveloper">Καταρχάς, σε ισχυρούς διακομιστές.
-Έπειτα, πληρώνουμε έναν προγραμματιστή πλήρους απασχόλησης: τον %s, ιδρυτή του Lichess.</string>
+Έπειτα, πληρώνουμε έναν προγραμματιστή πλήρους απασχόλησης: τον %s, ιδρυτή του Lichess.
+</string>
   <string name="costBreakdown">Δείτε εδώ τα αναλυτικά έξοδα του lichess</string>
   <string name="officialNonProfit">Είναι το Lichess μια επίσημη μη κερδοσκοπική οργάνωση;</string>
   <string name="actOfCreation">Ναι, δείτε εδώ την ιδρυτική πράξη (στα γαλλικά)</string>

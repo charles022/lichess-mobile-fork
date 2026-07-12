@@ -72,8 +72,11 @@
   <string name="blindfold" comment="As in Blindfold chess">Τυφλό</string>
   <string name="showClockOnTheLeft" comment="During the game on a mobile device, show the clock on the left side of the screen. Only applies to mobile devices.">Εμφάνιση στα αριστερά στις κινητές συσκευές</string>
   <string name="inlineNotation">Ενσωματωμένη σημειογραφία</string>
+  <string name="showGauge">Εμφάνιση μπάρας υπεροχής</string>
+  <string name="showMoveAnnotationsOnBoard">Εμφάνιση σχολιασμού κινήσεων</string>
   <string name="generalSettings">Γενικές</string>
   <string name="moveListSettings">Λίστα κινήσεων</string>
   <string name="boardSettings">Σκακιέρα</string>
   <string name="analysisSettings">Ρυθμίσεις ανάλυσης</string>
+  <string name="hoverOverSettingLabelsForHelp" comment="Instruction/guidance, explaining that hovering offer settings labels will show more information.&#10;&#10;Appears in the popover for &quot;Settings&quot; on game analysis for individual games.">Τοποθετήστε τον δείκτη πάνω από τις ετικέτες των ρυθμίσεων για βοήθεια</string>
 </resources>

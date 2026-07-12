@@ -33,9 +33,11 @@
   <string name="privateWillNeverBeShown">Privaatne. Pole nähtav väljaspool klassi. Aitab jätta meelde kes see õpilane on.</string>
   <string name="addStudent">Lisa õpilane</string>
   <string name="lichessProfileXCreatedForY">Lichessi profiil %1$s on tehtud %2$s jaoks.</string>
-  <string name="studentCredentials">Õpilane: %1$s
+  <string name="studentCredentials">
+Õpilane: %1$s
 Kasutajanimi: %2$s
-Parool: %3$s</string>
+Parool: %3$s
+</string>
   <string name="inviteALichessAccount">Kutsu Lichessi kasutaja</string>
   <string name="inviteDesc1">Kui õpilasel on juba Lichessi kasutaja siis sa saad neid kutsuda klassi.</string>
   <string name="inviteDesc2">Nad saavad Lichessis kirja, kus on link klassi juurde.</string>
