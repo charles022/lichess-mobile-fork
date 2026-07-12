@@ -10,7 +10,8 @@
   <string name="clearButton" comment="Buttons that clear things, e.g. recent searches. Should be short.">पुसा</string>
   <string name="correspondenceClearSavedMove" comment="This is shown in the correspondence game screen. Will clear the saved move.">जतन केलेली चाल पुसा</string>
   <string name="customGameJoinAGame" comment="This is shown in the custom game screen. Will open the game lobby.">खेळात सामील व्हा </string>
-  <string name="feedbackButton" comment="Shown in the settings, pressing this button will redirect to the lichess contact site.">अभिप्राय</string>
+  <string name="feedbackButton" comment="Shown in the settings, pressing this button will redirect to the lichess contact site.">
+अभिप्राय</string>
   <string name="goodEvening" comment="A greeting that is shown on the app's home page, e.g. 'Good evening, GM Magnus' (%s is substituted with the user's name). This is associated with a 'moon' icon and is displayed only between 18:00 and 06:00 local time. If the language you're translating into does not have this time based concept, just use a generic formula (like 'Hello' in english).">नमस्कार, %s</string>
   <string name="goodEveningWithoutName" comment="A greeting that is shown on the app's home page, when the user is not logged in. This is associated with a 'moon' icon and is displayed only between 18:00 and 06:00 local time. If the language you're translating into does not have this time based concept, just use a generic formula (like 'Hello' in english).">नमस्कार</string>
   <string name="goodDay" comment="A greeting that is shown on the app's home page, e.g. 'Good day, GM Magnus' (%s is substituted with the user's name). This is associated with a 'sun' icon and is displayed only between 06:00 and 18:00 local time. If the language you're translating into does not have this time based concept, just use a generic formula (like 'Hello' in english).">नमस्कार, %s</string>

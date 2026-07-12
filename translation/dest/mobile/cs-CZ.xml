@@ -76,6 +76,7 @@
   <string name="watchTab" comment="The tab in bottom navigation bar. Must be very short (10 characters max) to avoid ugly text shifting issues." maxLength="10">Sledovat</string>
   <string name="welcomeToLichessApp" comment="A welcome message shown only the first time the app is installed.">Vítejte v aplikaci Lichess!</string>
   <string name="viewGame" comment="Button text in puzzle settings to view the originating game.">Zobrazit hru</string>
+  <string name="customizeHomeTipDismiss" comment="Hides the widget to customize the home screen.">Zavřít</string>
   <string name="customizeButton" comment="Text of a button, so translation should be short.">Přizpůsobit</string>
   <string name="stopShowingThreat" comment="This disables the 'Show Treat' mode in analysis.">Skrýt zobrazování hrozby</string>
   <string name="tournamentJumpToMyPage" comment="Accessibility description of a button that jumps to user's position in tournament standings">Přejít na moji stránku</string>
