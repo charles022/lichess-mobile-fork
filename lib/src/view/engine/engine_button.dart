@@ -7,8 +7,12 @@ import 'package:lichess_mobile/src/model/common/eval.dart';
 import 'package:lichess_mobile/src/model/engine/engine.dart';
 import 'package:lichess_mobile/src/model/engine/evaluation_preferences.dart';
 import 'package:lichess_mobile/src/model/engine/evaluation_service.dart';
+import 'package:lichess_mobile/src/model/engine/external/external_engine.dart';
+import 'package:lichess_mobile/src/model/engine/external/external_engine_providers.dart';
+import 'package:lichess_mobile/src/model/engine/work.dart';
 import 'package:lichess_mobile/src/utils/l10n_context.dart';
 import 'package:lichess_mobile/src/widgets/buttons.dart';
+import 'package:lichess_mobile/src/widgets/feedback.dart';
 import 'package:popover/popover.dart';
 
 /// A button to toggle engine evaluation and show engine depth.
@@ -37,6 +41,17 @@ class _EngineButtonState extends ConsumerState<EngineButton> {
     final (engineName: engineName, eval: localEval, state: engineState, currentWork: work) = ref
         .watch(engineEvaluationProvider(widget.filters));
     final eval = pickBestClientEval(localEval: localEval, savedEval: widget.savedEval);
+
+    final externalEngineStatus = ref.watch(externalEngineStatusProvider);
+    ref.listen<ExternalEngineStatus>(externalEngineStatusProvider, (previous, next) {
+      if (next == .offline && previous != .offline) {
+        showSnackBar(
+          context,
+          'External engine offline — using local engine',
+          type: SnackBarType.info,
+        );
+      }
+    });
 
     final newChipColor = prefs.isEnabled
         ? switch (engineState) {
@@ -136,7 +151,7 @@ class _EngineButtonState extends ConsumerState<EngineButton> {
         Positioned(
           bottom: -6,
           child: Text(
-            engineShortLabel(engineName) ?? prefs.enginePref.shortLabel,
+            _engineLabel(prefs, engineName, work, externalEngineStatus),
             style: TextStyle(
               fontSize: 10,
               fontWeight: FontWeight.w700,
@@ -146,6 +161,26 @@ class _EngineButtonState extends ConsumerState<EngineButton> {
         ),
       ],
     );
+  }
+
+  /// The short engine label below the chip.
+  ///
+  /// When the current work is computed by an external engine, shows that engine's (possibly
+  /// truncated) name; otherwise the local engine label.
+  String _engineLabel(
+    EngineEvaluationPrefState prefs,
+    String? engineName,
+    EvalWork? work,
+    ExternalEngineStatus externalEngineStatus,
+  ) {
+    final isExternalWork =
+        work?.externalEngine != null &&
+        (externalEngineStatus == .connecting || externalEngineStatus == .connected);
+    if (isExternalWork) {
+      final name = work!.externalEngine!.name;
+      return engineShortLabel(name) ?? (name.length > 8 ? '${name.substring(0, 7)}…' : name);
+    }
+    return engineShortLabel(engineName) ?? prefs.enginePref.shortLabel;
   }
 }
 
@@ -294,6 +329,45 @@ class _EnginePopup extends ConsumerWidget {
       EngineState.computing || EngineState.idle => evalStateEval,
       _ => null,
     };
+
+    final externalEngineStatus = ref.watch(externalEngineStatusProvider);
+    if (work?.externalEngine != null && externalEngineStatus == .offline) {
+      return ListTile(
+        contentPadding: const EdgeInsets.only(left: 16.0),
+        leading: const Icon(Icons.cloud_off),
+        title: Text('${work!.externalEngine!.name} is offline'),
+        subtitle: const Text('Using local engine'),
+        trailing: IconButton(
+          icon: const Icon(Icons.refresh),
+          onPressed: () => ref.read(evaluationServiceProvider).retryExternalEngine(),
+          tooltip: 'Retry',
+        ),
+      );
+    }
+
+    if (work?.externalEngine != null &&
+        (externalEngineStatus == .connecting || externalEngineStatus == .connected)) {
+      final knps = engineState == EngineState.computing
+          ? ', ${evalStateEval?.knps.round()}kn/s'
+          : '';
+      return ListTile(
+        contentPadding: const EdgeInsets.only(left: 16.0),
+        leading: const Icon(Icons.dns_outlined),
+        title: Text(work!.externalEngine!.name),
+        subtitle: externalEngineStatus == .connecting
+            ? const Text('Connecting…')
+            : currentEval != null
+            ? Text(context.l10n.depthX('${currentEval.depth}$knps'))
+            : null,
+        trailing: canGoDeeper
+            ? IconButton(
+                icon: const Icon(Icons.add_circle_outlined),
+                onPressed: goDeeper,
+                tooltip: context.l10n.goDeeper,
+              )
+            : null,
+      );
+    }
 
     if (currentEval is CloudEval) {
       return ListTile(

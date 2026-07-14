@@ -3,6 +3,7 @@ import 'dart:math';
 
 import 'package:dartchess/dartchess.dart';
 import 'package:lichess_mobile/src/constants.dart';
+import 'package:lichess_mobile/src/model/common/chess.dart';
 import 'package:multistockfish/multistockfish.dart';
 
 /// Maximum number of CPU cores available for engine use.
@@ -56,3 +57,19 @@ Position threatModePosition(Position position) => position.copyWith(
   halfmoves: position.halfmoves + 1,
   fullmoves: position.turn == Side.black ? position.fullmoves + 1 : position.fullmoves,
 );
+
+extension FairyVariantExtension on Variant {
+  /// The Fairy-Stockfish variant name
+  String get fairy => switch (this) {
+    Variant.standard => 'chess',
+    Variant.chess960 => 'chess',
+    Variant.fromPosition => 'chess',
+    Variant.antichess => 'antichess',
+    Variant.kingOfTheHill => 'kingofthehill',
+    Variant.threeCheck => '3check',
+    Variant.atomic => 'atomic',
+    Variant.horde => 'horde',
+    Variant.racingKings => 'racingkings',
+    Variant.crazyhouse => 'crazyhouse',
+  };
+}

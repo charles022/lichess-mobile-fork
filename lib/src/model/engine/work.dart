@@ -6,6 +6,7 @@ import 'package:lichess_mobile/src/model/common/eval.dart';
 import 'package:lichess_mobile/src/model/common/id.dart';
 import 'package:lichess_mobile/src/model/common/node.dart';
 import 'package:lichess_mobile/src/model/common/uci.dart';
+import 'package:lichess_mobile/src/model/engine/external/external_engine.dart';
 import 'package:lichess_mobile/src/model/engine/stockfish_level.dart';
 import 'package:multistockfish/multistockfish.dart';
 
@@ -62,6 +63,11 @@ sealed class EvalWork extends Work with _$EvalWork {
     bool? isDeeper,
     required Position initialPosition,
     required IList<Step> steps,
+
+    /// When set, the evaluation service routes this work to the external engine broker instead
+    /// of the local Stockfish (with a fallback to the local engine on failure, using this same
+    /// work item: [threads] and [hashSize] keep their local-engine values).
+    ExternalEngineWorkSpec? externalEngine,
   }) = _EvalWork;
 
   @override

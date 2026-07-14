@@ -1,0 +1,93 @@
+name: Build sideload APK
+
+# Builds a release APK for sideloading on a device (e.g. Pixel 10 Pro), without
+# any Play Store involvement. Trigger it manually from the Actions tab and
+# download the `lichess-mobile-apk` artifact when it finishes.
+#
+# Signing: if the SIDELOAD_KEYSTORE* secrets are configured, the APK is signed
+# with that key so subsequent builds install as updates. Otherwise an ephemeral
+# key is generated for the run — the APK installs fine, but the next build's
+# APK will require uninstalling the previous one first.
+#
+# To create a persistent key (recommended), run locally:
+#   keytool -genkey -v -keystore sideload.jks -keyalg RSA -keysize 2048 \
+#     -validity 10000 -alias sideload
+#   base64 -w0 sideload.jks   # -> SIDELOAD_KEYSTORE secret
+# and set SIDELOAD_KEYSTORE_PASSWORD and SIDELOAD_KEY_ALIAS secrets accordingly.
+#
+# Note: the release application id is org.lichess.mobileV2, the same as the
+# official app — uninstall the Play Store app before installing this APK.
+
+on:
+  workflow_dispatch:
+
+permissions: read-all
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5.2.0
+        with:
+          java-version: 17
+          distribution: temurin
+
+      - name: Checkout mobile code
+        uses: actions/checkout@v6.0.3
+
+      - name: Install Flutter
+        uses: subosito/flutter-action@v2.23.0
+        with:
+          channel: stable
+          flutter-version-file: pubspec.yaml
+      - run: flutter --version
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Code generation
+        run: dart run build_runner build
+
+      - name: Configure Keystore
+        run: |
+          if [ -n "$SIDELOAD_KEYSTORE" ]; then
+            echo "Using persistent sideload keystore from secrets"
+            echo "$SIDELOAD_KEYSTORE" | base64 --decode > app/sideload.jks
+            STORE_PASSWORD="$SIDELOAD_KEYSTORE_PASSWORD"
+            KEY_ALIAS="${SIDELOAD_KEY_ALIAS:-sideload}"
+          else
+            echo "No SIDELOAD_KEYSTORE secret; generating an ephemeral signing key"
+            STORE_PASSWORD="$(openssl rand -hex 16)"
+            KEY_ALIAS=sideload
+            keytool -genkey -v -keystore app/sideload.jks -keyalg RSA \
+              -keysize 2048 -validity 10000 -alias "$KEY_ALIAS" \
+              -storepass "$STORE_PASSWORD" -keypass "$STORE_PASSWORD" \
+              -dname "CN=lichess-mobile-fork sideload"
+          fi
+          {
+            echo "storeFile=sideload.jks"
+            echo "keyAlias=$KEY_ALIAS"
+            echo "storePassword=$STORE_PASSWORD"
+            echo "keyPassword=$STORE_PASSWORD"
+          } >> key.properties
+        env:
+          SIDELOAD_KEYSTORE: ${{ secrets.SIDELOAD_KEYSTORE }}
+          SIDELOAD_KEYSTORE_PASSWORD: ${{ secrets.SIDELOAD_KEYSTORE_PASSWORD }}
+          SIDELOAD_KEY_ALIAS: ${{ secrets.SIDELOAD_KEY_ALIAS }}
+        working-directory: android
+
+      - name: Build release APK (arm64)
+        run: >
+          flutter build apk --release --target-platform android-arm64
+          --dart-define=cronetHttpNoPlay=true
+          --dart-define=LICHESS_HOST=lichess.org
+          --dart-define=LICHESS_WS_HOST=socket.lichess.org
+          ${{ secrets.WS_SECRET != '' && format('--dart-define=LICHESS_WS_SECRET={0}', secrets.WS_SECRET) || '' }}
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lichess-mobile-apk
+          path: build/app/outputs/flutter-apk/app-release.apk
+          retention-days: 14

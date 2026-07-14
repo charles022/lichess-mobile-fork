@@ -1,8 +1,10 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:lichess_mobile/src/model/auth/auth_controller.dart';
 import 'package:lichess_mobile/src/model/engine/engine.dart';
 import 'package:lichess_mobile/src/model/engine/evaluation_preferences.dart';
+import 'package:lichess_mobile/src/model/engine/external/external_engine_providers.dart';
 import 'package:lichess_mobile/src/model/engine/nnue_service.dart';
 import 'package:lichess_mobile/src/utils/l10n_context.dart';
 import 'package:lichess_mobile/src/utils/navigation.dart';
@@ -65,6 +67,8 @@ class _EngineSettingsScreenState extends ConsumerState<EngineSettingsScreen> {
   @override
   Widget build(BuildContext context) {
     final prefs = ref.watch(engineEvaluationPreferencesProvider);
+    final isLoggedIn = ref.watch(isLoggedInProvider);
+    final externalEngines = ref.watch(externalEnginesProvider);
 
     return Scaffold(
       appBar: AppBar(title: const Text('Chess engine')),
@@ -170,6 +174,67 @@ class _EngineSettingsScreenState extends ConsumerState<EngineSettingsScreen> {
                   ),
               ],
             ),
+          if (isLoggedIn)
+            switch (externalEngines) {
+              AsyncData(:final value) => ListSection(
+                header: const SettingsSectionTitle('External engines'),
+                footer: const Text(
+                  'External engines run on your own hardware and are registered with your '
+                  'Lichess account. When the selected engine is unreachable, analysis falls '
+                  'back to the local engine.',
+                ),
+                children: [
+                  if (value.isEmpty)
+                    const ListTile(
+                      title: Text('No external engine registered'),
+                      subtitle: Text(
+                        'Run an engine provider on your own hardware to register one with your '
+                        'account.',
+                      ),
+                    )
+                  else
+                    for (final engine in value)
+                      ListTile(
+                        title: Text(engine.name),
+                        subtitle: Text('${engine.maxThreads} threads, ${engine.maxHash} MB hash'),
+                        trailing: prefs.externalEngineId == engine.id
+                            ? const Icon(Icons.check)
+                            : null,
+                        onTap: () {
+                          ref
+                              .read(engineEvaluationPreferencesProvider.notifier)
+                              .setExternalEngine(
+                                prefs.externalEngineId == engine.id ? null : engine,
+                              );
+                        },
+                      ),
+                  if (prefs.externalEngineId != null &&
+                      value.every((engine) => engine.id != prefs.externalEngineId))
+                    ListTile(
+                      leading: const Icon(Icons.warning_amber),
+                      title: Text(prefs.externalEngineName ?? 'Selected engine'),
+                      subtitle: const Text(
+                        'No longer available — using local engine (tap to clear)',
+                      ),
+                      onTap: () {
+                        ref
+                            .read(engineEvaluationPreferencesProvider.notifier)
+                            .setExternalEngine(null);
+                      },
+                    ),
+                ],
+              ),
+              AsyncError() => const ListSection(
+                header: SettingsSectionTitle('External engines'),
+                children: [ListTile(title: Text('Could not load external engines'))],
+              ),
+              _ => Shimmer(
+                child: ShimmerLoading(
+                  isLoading: true,
+                  child: ListSection.loading(itemsNumber: 1, header: true),
+                ),
+              ),
+            },
           EngineSettingsWidget(
             onSetEngineSearchTime: (value) {
               ref.read(engineEvaluationPreferencesProvider.notifier).setEngineSearchTime(value);

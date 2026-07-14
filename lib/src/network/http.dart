@@ -754,9 +754,35 @@ extension ClientExtension on Client {
     Uri url, {
     Map<String, String>? headers,
     required T Function(Map<String, dynamic>) mapper,
-  }) async {
+  }) {
     final request = Request('GET', url);
     if (headers != null) request.headers.addAll(headers);
+    return _sendNdJsonStreamRequest(request, mapper);
+  }
+
+  /// Sends an HTTP POST request with the given headers and body to the given URL and
+  /// returns a Future that completes to the stream of the response as a ND-JSON
+  /// object mapped to T.
+  ///
+  /// Throws a [ServerException] if the response doesn't have a success status code.
+  /// Throws a [ClientException] if the response JSON body can't be decoded.
+  Future<Stream<T>> postNdJsonStream<T>(
+    Uri url, {
+    Map<String, String>? headers,
+    String? body,
+    required T Function(Map<String, dynamic>) mapper,
+  }) {
+    final request = Request('POST', url);
+    if (headers != null) request.headers.addAll(headers);
+    if (body != null) request.body = body;
+    return _sendNdJsonStreamRequest(request, mapper);
+  }
+
+  Future<Stream<T>> _sendNdJsonStreamRequest<T>(
+    Request request,
+    T Function(Map<String, dynamic>) mapper,
+  ) async {
+    final url = request.url;
     final response = await send(request);
     if (response.statusCode >= 400) {
       var message = 'Request to $url failed with status ${response.statusCode}';
@@ -766,10 +792,16 @@ extension ClientExtension on Client {
       throw ServerException(response.statusCode, '$message.', url, null);
     }
     try {
-      return response.stream.map(utf8.decode).where((e) => e.isNotEmpty && e != '\n').map((e) {
-        final json = jsonDecode(e) as Map<String, dynamic>;
-        return mapper(json);
-      });
+      // split on newlines and not on chunk boundaries, as a JSON object may span
+      // several chunks, or a single chunk may contain several objects
+      return response.stream
+          .transform(utf8.decoder)
+          .transform(const LineSplitter())
+          .where((e) => e.isNotEmpty)
+          .map((e) {
+            final json = jsonDecode(e) as Map<String, dynamic>;
+            return mapper(json);
+          });
     } catch (e) {
       _logger.severe('Could not read nd-json object as $T.');
       throw ClientException('Could not read nd-json object as $T: $e', url);
