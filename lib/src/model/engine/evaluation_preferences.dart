@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:freezed_annotation/freezed_annotation.dart';
 import 'package:lichess_mobile/src/model/engine/engine.dart';
+import 'package:lichess_mobile/src/model/engine/external/external_engine.dart';
 import 'package:lichess_mobile/src/model/settings/preferences_storage.dart';
 import 'package:multistockfish/multistockfish.dart';
 
@@ -59,6 +60,15 @@ class EngineEvaluationPreferences extends Notifier<EngineEvaluationPrefState>
   Future<void> setEvaluationFunction(ChessEnginePref enginePref) {
     return save(state.copyWith(enginePref: enginePref));
   }
+
+  /// Selects the external engine to use for evaluation, or clears the selection when `null`.
+  ///
+  /// Only the engine id and name are persisted (the name is a display cache for when the engine
+  /// list is unavailable). The engine is resolved fresh from the server each session, so the
+  /// sensitive `clientSecret` is never stored on the device.
+  Future<void> setExternalEngine(ExternalEngine? engine) {
+    return save(state.copyWith(externalEngineId: engine?.id, externalEngineName: engine?.name));
+  }
 }
 
 enum ChessEnginePref {
@@ -103,6 +113,17 @@ sealed class EngineEvaluationPrefState with _$EngineEvaluationPrefState implemen
     required Duration engineSearchTime,
     @JsonKey(defaultValue: ChessEnginePref.sf16, unknownEnumValue: ChessEnginePref.sf16)
     required ChessEnginePref enginePref,
+
+    /// Id of the selected external engine, or `null` to use the local engine.
+    ///
+    /// External engines are per-account, so the selection may not resolve to an engine (e.g.
+    /// after a logout or account switch); every unresolvable state falls back to the local
+    /// engine. [enginePref] keeps defining the local flavor used in that case.
+    String? externalEngineId,
+
+    /// Name of the selected external engine, cached for display when the engine list is
+    /// unavailable.
+    String? externalEngineName,
   }) = _EngineEvaluationPrefState;
 
   static const defaults = EngineEvaluationPrefState(

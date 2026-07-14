@@ -8,9 +8,13 @@ import 'package:lichess_mobile/src/model/common/eval.dart';
 import 'package:lichess_mobile/src/model/common/id.dart';
 import 'package:lichess_mobile/src/model/common/preloaded_data.dart';
 import 'package:lichess_mobile/src/model/common/uci.dart';
+import 'package:lichess_mobile/src/model/engine/engine.dart';
+import 'package:lichess_mobile/src/model/engine/external/external_engine.dart';
+import 'package:lichess_mobile/src/model/engine/external/external_engine_client.dart';
 import 'package:lichess_mobile/src/model/engine/nnue_service.dart';
 import 'package:lichess_mobile/src/model/engine/uci_protocol.dart';
 import 'package:lichess_mobile/src/model/engine/work.dart';
+import 'package:lichess_mobile/src/network/http.dart';
 import 'package:logging/logging.dart';
 import 'package:multistockfish/multistockfish.dart';
 
@@ -36,7 +40,14 @@ class MoveRequestCancelledException implements Exception {
 final evaluationServiceProvider = Provider<EvaluationService>((Ref ref) {
   final maxMemory = ref.read(preloadedDataProvider).requireValue.engineMaxMemoryInMb;
   final nnueService = ref.read(nnueServiceProvider);
-  final service = EvaluationService(maxMemory: maxMemory, nnueService: nnueService);
+  final externalEngineClient = ExternalEngineClient(
+    clientFactory: ref.read(httpClientFactoryProvider),
+  );
+  final service = EvaluationService(
+    maxMemory: maxMemory,
+    nnueService: nnueService,
+    externalEngineClient: externalEngineClient,
+  );
 
   ref.onDispose(() {
     service._dispose();
@@ -51,13 +62,20 @@ final evaluationServiceProvider = Provider<EvaluationService>((Ref ref) {
 /// can run at a time - when a new evaluation is requested, it takes over from any
 /// previous one ("last caller wins").
 class EvaluationService {
-  EvaluationService({required this.maxMemory, required this._nnueService}) {
+  EvaluationService({
+    required this.maxMemory,
+    required this._nnueService,
+    required ExternalEngineClient externalEngineClient,
+  }) : _externalClient = externalEngineClient {
     _stdoutSubscription = _stockfish.stdout.listen(_protocol.received);
     _stockfish.state.addListener(_onStockfishStateChange);
     _protocol.isComputing.addListener(_onComputingChange);
     _protocol.engineName.addListener(_onEngineNameChange);
     _evalSubscription = _protocol.evalStream.listen(_onEvalResult);
     _moveSubscription = _protocol.moveStream.listen(_onMoveResult);
+    _externalClient.onEval = _onExternalEval;
+    _externalClient.onDone = _onExternalDone;
+    _externalClient.onFailure = _onExternalFailure;
   }
 
   static const _defaultState = (
@@ -69,10 +87,36 @@ class EvaluationService {
 
   final int maxMemory;
   final NnueService _nnueService;
+  final ExternalEngineClient _externalClient;
 
   Stockfish get _stockfish => LichessBinding.instance.stockfish;
 
   final UCIProtocol _protocol = UCIProtocol();
+
+  /// Whether the current eval work is being computed by the external engine.
+  ///
+  /// While `true`, local protocol state changes are ignored so they don't stomp the external
+  /// engine state (the local engine may still asynchronously wind down after being stopped).
+  bool _externalWorkActive = false;
+
+  /// The name of the external engine computing the current work, shown instead of the local
+  /// engine name.
+  String? _externalEngineName;
+
+  /// The status of the external engine for the current session.
+  ValueListenable<ExternalEngineStatus> get externalEngineStatus => _externalClient.status;
+
+  /// Resets the external engine status after a failure, so the next evaluation request tries
+  /// the external engine again.
+  ///
+  /// If the current work wants the external engine, it is re-dispatched immediately.
+  void retryExternalEngine() {
+    _externalClient.resetStatus();
+    final work = _evaluationState.value.currentWork;
+    if (work != null && work.externalEngine != null) {
+      _startWork(work);
+    }
+  }
 
   // serialize engine start/quit operations to avoid races
   Future<void> _engineOpQueue = Future<void>.value();
@@ -159,7 +203,7 @@ class EvaluationService {
   }) {
     final current = _evaluationState.value;
     final newState = (
-      engineName: _protocol.engineName.value,
+      engineName: _externalEngineName ?? _protocol.engineName.value,
       eval: evalFn != null ? evalFn() : current.eval,
       state: state ?? current.state,
       currentWork: workFn != null ? workFn() : current.currentWork,
@@ -304,7 +348,35 @@ class EvaluationService {
   }
 
   /// Start the given [work], restarting the engine if necessary.
-  void _startWork(Work work) {
+  ///
+  /// [EvalWork]s carrying an external engine spec are routed to the external engine broker,
+  /// unless the external engine went offline in this session (or [forceLocal] is set, which is
+  /// how a failed external work is re-dispatched to the local engine).
+  void _startWork(Work work, {bool forceLocal = false}) {
+    final externalSpec = work is EvalWork ? work.externalEngine : null;
+    final useExternalEngine =
+        !forceLocal &&
+        externalSpec != null &&
+        _externalClient.status.value != ExternalEngineStatus.offline;
+
+    if (useExternalEngine) {
+      _setEvalWork(work as EvalWork);
+      _discardEvalResults = false;
+      _discardMoveResults = true;
+      _cancelPendingMoveRequest();
+      // Stop any local engine computation; keep the process alive for a possible fallback.
+      _protocol.compute(null);
+      _externalWorkActive = true;
+      _externalEngineName = externalSpec.name;
+      _setEngineState(EngineState.loading);
+      _externalClient.start(work);
+      return;
+    }
+
+    _externalClient.stop();
+    _externalWorkActive = false;
+    _externalEngineName = null;
+
     final flavor = officialStockfishVariants.contains(work.variant)
         ? work.stockfishFlavor
         : StockfishFlavor.variant;
@@ -417,6 +489,7 @@ class EvaluationService {
   }
 
   void _onStockfishStateChange() {
+    if (_externalWorkActive) return;
     switch (_stockfish.state.value) {
       case StockfishState.initial:
         // Don't overwrite loading state during engine restart
@@ -437,6 +510,7 @@ class EvaluationService {
   void _onComputingChange() {
     // When both discard flags are set, a quit is in progress; ignore computing state changes.
     if (_discardEvalResults && _discardMoveResults) return;
+    if (_externalWorkActive) return;
 
     if (_protocol.isComputing.value) {
       _setEngineState(EngineState.computing);
@@ -495,11 +569,39 @@ class EvaluationService {
     _moveController.add(result);
   }
 
+  void _onExternalEval(EvalResult result) {
+    if (!_externalWorkActive) return;
+    _setEngineState(EngineState.computing);
+    _onEvalResult(result);
+  }
+
+  void _onExternalDone() {
+    if (!_externalWorkActive) return;
+    if (_engineState == EngineState.computing || _engineState == EngineState.loading) {
+      _setEngineState(EngineState.idle);
+    }
+  }
+
+  /// Handles an external engine failure by falling back to the local engine.
+  ///
+  /// The external client has already marked itself offline, so re-dispatching the same work
+  /// routes it to the local engine (as will every subsequent work in this session).
+  void _onExternalFailure(EvalWork work, Object error) {
+    if (_evaluationState.value.currentWork == work) {
+      _logger.info('External engine failed, falling back to the local engine');
+      _startWork(work, forceLocal: true);
+    } else {
+      _externalWorkActive = false;
+      _externalEngineName = null;
+    }
+  }
+
   /// Stop the current work (evaluation or move search).
   ///
   /// This method stops the engine from computing further but does not clear the evaluation state.
   /// The engine can still emit results for the current work until it fully stops.
   void stop() {
+    _externalClient.stop();
     _protocol.compute(null);
     _currentMoveWork = null;
     _setEvalWork(null);
@@ -516,6 +618,9 @@ class EvaluationService {
     }
     _logger.info('Quitting engine');
     _quitInProgress = true;
+    _externalClient.quit();
+    _externalWorkActive = false;
+    _externalEngineName = null;
     _protocol.compute(null);
     _evalThrottleTimer?.cancel();
     _evalThrottleTimer = null;
@@ -544,6 +649,7 @@ class EvaluationService {
   }
 
   void _dispose() {
+    _externalClient.dispose();
     _evalThrottleTimer?.cancel();
     _evalThrottleTimer = null;
     _pendingEvalResult = null;
@@ -661,20 +767,4 @@ ClientEval? pickBestClientEval({
       pickBestEval(localEval: localEval, savedEval: savedEval, serverEval: null) as ClientEval?;
 
   return eval;
-}
-
-extension FairyVariantExtension on Variant {
-  /// The Fairy-Stockfish variant name
-  String get fairy => switch (this) {
-    Variant.standard => 'chess',
-    Variant.chess960 => 'chess',
-    Variant.fromPosition => 'chess',
-    Variant.antichess => 'antichess',
-    Variant.kingOfTheHill => 'kingofthehill',
-    Variant.threeCheck => '3check',
-    Variant.atomic => 'atomic',
-    Variant.horde => 'horde',
-    Variant.racingKings => 'racingkings',
-    Variant.crazyhouse => 'crazyhouse',
-  };
 }

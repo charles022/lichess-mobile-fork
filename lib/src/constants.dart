@@ -28,6 +28,12 @@ const kLichessTablebaseHost = String.fromEnvironment(
   defaultValue: 'tablebase.lichess.org',
 );
 
+/// Host of the external engine broker (lila-engine).
+const kLichessEngineHost = String.fromEnvironment(
+  'LICHESS_ENGINE_HOST',
+  defaultValue: 'engine.lichess.ovh',
+);
+
 const kLichessCustomUriSchemeName = 'org.lichess.mobile';
 
 const kLichessClientId = 'lichess_mobile';

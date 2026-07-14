@@ -14,6 +14,8 @@ import 'package:lichess_mobile/src/model/common/uci.dart';
 import 'package:lichess_mobile/src/model/engine/engine.dart';
 import 'package:lichess_mobile/src/model/engine/evaluation_preferences.dart';
 import 'package:lichess_mobile/src/model/engine/evaluation_service.dart';
+import 'package:lichess_mobile/src/model/engine/external/external_engine.dart';
+import 'package:lichess_mobile/src/model/engine/external/external_engine_providers.dart';
 import 'package:lichess_mobile/src/model/engine/work.dart';
 import 'package:lichess_mobile/src/network/socket.dart';
 import 'package:lichess_mobile/src/utils/json.dart';
@@ -115,6 +117,15 @@ mixin EngineEvaluationMixin<T extends EvaluationMixinState<T>> on AnyNotifier<As
   @override
   void runBuild() {
     _evaluationService = ref.watch(evaluationServiceProvider);
+
+    // Keeps the selected external engine resolution alive for the lifetime of this notifier
+    // (so that reads in [_startEngineEval] see the resolved value), and requests a new eval
+    // when it changes (e.g. the engine list arrives, or the user picks another engine).
+    ref.listen<AsyncValue<ExternalEngine?>>(selectedExternalEngineProvider, (previous, next) {
+      if (previous?.value != next.value && state.hasValue) {
+        requestEval();
+      }
+    });
 
     ref.onDispose(() {
       _evalRequestDebounce.cancel();
@@ -296,11 +307,19 @@ mixin EngineEvaluationMixin<T extends EvaluationMixinState<T>> on AnyNotifier<As
     });
   }
 
+  /// The selected external engine, if it is resolved and supports the given [variant].
+  ExternalEngine? _resolveExternalEngine(Variant variant) {
+    final selectedEngine = ref.read(selectedExternalEngineProvider).value;
+    if (selectedEngine == null || !selectedEngine.supportsVariant(variant)) return null;
+    return selectedEngine;
+  }
+
   void _startEngineEval({bool goDeeper = false}) {
     final curState = state.requireValue;
     if (!curState.isEngineAvailable(evaluationPrefs)) return;
 
     final searchTime = goDeeper ? kMaxEngineSearchTime : evaluationPrefs.engineSearchTime;
+    final externalEngine = _resolveExternalEngine(curState.evaluationContext.variant);
 
     final work = EvalWork(
       id: curState.evaluationContext.id,
@@ -315,6 +334,7 @@ mixin EngineEvaluationMixin<T extends EvaluationMixinState<T>> on AnyNotifier<As
       isDeeper: goDeeper ? true : null,
       initialPosition: curState.evaluationContext.initialPosition,
       steps: positionTree.branchesOn(curState.currentPath).map(Step.fromNode).toIList(),
+      externalEngine: externalEngine?.workSpec,
     );
 
     _evaluationService.evaluate(work, goDeeper: goDeeper)?.forEach((event) {
