@@ -446,6 +446,22 @@ Widget UI strings are translated via `ios/LichessWidgets/Localizable.xcstrings` 
 
 The extension has its own bundle ID (`org.lichess.mobileV2.LichessWidgets`) and App Group entitlement. fastlane `sync_code_signing` handles provisioning for both targets (see `ios/fastlane/Matchfile`).
 
+## Ephemeral sandbox sessions (Claude Code web / fresh containers)
+
+Fresh sandbox containers have no Flutter SDK, and the sandbox egress proxy blocks the GitHub
+release download that the `sqlite3` package's native-asset build hook performs on the first
+`flutter test` (it fails with a hash mismatch on `libsqlite3.x64.linux.so` because the proxy
+returns a JSON error body instead of the binary). Run once at session start:
+
+```bash
+./scripts/claude-sandbox-setup.sh
+export PATH="/opt/flutter-sdk/flutter/bin:$PATH"
+```
+
+This installs the pinned Flutter version, applies a **local-only** `pubspec.yaml` override
+(system sqlite3 for tests), and runs pub get + build_runner. **Never commit the pubspec.yaml
+change it makes** — exclude it when staging, or `git checkout -- pubspec.yaml` first.
+
 ## Debugging
 
 ```bash
