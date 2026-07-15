@@ -32,8 +32,9 @@ const engineHost = String.fromEnvironment(
 );
 
 /// A position where black is clearly winning (white queen is gone), to verify the point of
-/// view of `cp` scores: if the streamed `cp` is positive here with black to move, scores are
-/// from the side to move's point of view (as raw UCI) and the app must flip them.
+/// view of `cp` scores: negative `cp` here means scores are from white's point of view
+/// (verified live 2026-07-15: the broker streams ~-800); positive would mean side-to-move
+/// point of view as in raw UCI, requiring a flip in the app.
 const povCheckFen = 'rnb1kbnr/pppp1ppp/8/4p3/6q1/5P2/PPPPP1PP/RNB1KBNR b KQkq - 0 3';
 
 Future<void> main(List<String> args) async {
@@ -94,7 +95,8 @@ Future<void> analyse(String token, {String? engineId, required Duration cancelAf
   final engine = engineId != null ? engines.firstWhere((e) => e['id'] == engineId) : engines.first;
   print(
     '\nAnalysing PoV-check position with ${engine['name']} '
-    '(black to move, black winning: expect positive cp if scores are side-to-move PoV)',
+    '(black to move, black winning: negative cp = white PoV as observed live, '
+    'positive cp = side-to-move PoV)',
   );
 
   final client = http.Client();

@@ -78,8 +78,15 @@ verifies that the spike CLI compiles, and skips the live steps with a notice.
    `lib/src/model/auth/auth_repository.dart` needs `engine:read` added and users must
    re-login.
 
-2. **Analyse request/response contract (automated).** Tier 1 asserts eval-line shape
-   and cp point of view against the real broker on every run.
+2. **Analyse request/response contract (automated — and it found a real bug).** The
+   first live run (2026-07-15) proved the broker streams `cp`/`mate` scores from
+   **white's point of view**, not the side to move's as the protocol notes assumed: the
+   black-to-move winning position streamed cp ≈ -800. The app's UCI-style score flip
+   would have inverted the eval whenever black was to move; the flip has been removed
+   (`external_engine_repository.dart`) and Tier 1 now asserts the white-anchored
+   convention on every run. The same run also showed lichess.org **accepts the app's
+   HMAC-signed bearer form** for `/api/external-engine` (relevant to hurdle 1, though
+   the `web:mobile` scope question itself still needs a real app session).
 
 3. **Spike CLI coverage (fixed).** The spike could not previously run on the plain
    Dart VM at all: it imported `bearer.dart`, which pulled in the Flutter-only

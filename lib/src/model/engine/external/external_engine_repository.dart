@@ -1,7 +1,6 @@
 import 'dart:convert';
 import 'dart:math' as math;
 
-import 'package:dartchess/dartchess.dart';
 import 'package:deep_pick/deep_pick.dart';
 import 'package:fast_immutable_collections/fast_immutable_collections.dart';
 import 'package:http/http.dart' show Client;
@@ -100,32 +99,29 @@ Map<String, dynamic> externalEngineAnalyseRequestBody({
   };
 }
 
-/// Maps a broker ND-JSON eval snapshot to a [LocalEval], mirroring the way
-/// `UCIProtocol._processEvalInfo` maps UCI `info` lines.
+/// Maps a broker ND-JSON eval snapshot to a [LocalEval].
 ///
 /// Each snapshot has the shape
 /// `{"time": 1234, "depth": 20, "nodes": 123456, "pvs": [{"moves": [...], "cp": 30, "depth": 20}]}`
-/// where `cp`/`mate` scores are from the point of view of the side to move, as in raw UCI.
+/// where `cp`/`mate` scores are from the white point of view — unlike raw UCI, whose scores are
+/// from the side to move's point of view. Verified against the live broker with the reference
+/// provider (a black-to-move winning position streams negative cp); the external engine live
+/// protocol test workflow asserts this on every run. [LocalEval] scores are white-anchored, so
+/// no conversion is needed, in threat mode either (white PoV does not depend on whose turn the
+/// analysed position is).
 ///
 /// Returns `null` for snapshots below the minimum depth, which are not worth displaying.
 LocalEval? externalEngineEvalFromJson(Map<String, dynamic> json, {required EvalWork work}) {
   final timeMs = pick(json, 'time').asIntOrThrow();
   final nodes = pick(json, 'nodes').asIntOrThrow();
 
-  // Scores are from the side to move's point of view and must be converted to be from the
-  // white point of view (or black in threat mode), like the UCI protocol does.
-  final pivot = work.threatMode ? Side.black : Side.white;
-  final sign = work.position.turn == pivot ? 1 : -1;
-
   int depth = pick(json, 'depth').asIntOrThrow();
   final pvs = pick(json, 'pvs').asListOrThrow((pv) {
     depth = math.min(depth, pv('depth').asIntOrThrow());
-    final cp = pv('cp').asIntOrNull();
-    final mate = pv('mate').asIntOrNull();
     return PvData(
       moves: pv('moves').asListOrThrow((move) => move.asStringOrThrow()).toIList(),
-      cp: cp != null ? sign * cp : null,
-      mate: mate != null ? sign * mate : null,
+      cp: pv('cp').asIntOrNull(),
+      mate: pv('mate').asIntOrNull(),
     );
   }).toIList();
 
