@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:dartchess/dartchess.dart';
 import 'package:fast_immutable_collections/fast_immutable_collections.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -209,7 +211,8 @@ void main() {
       final mockClient = MockClient((request) {
         if (request.url.path == '/player') {
           expect(request.url.queryParameters['variant'], 'crazyhouse');
-          return mockResponse(response, 200);
+          // the player endpoint streams ND-JSON: the whole object must be on a single line
+          return mockResponse(jsonEncode(jsonDecode(response)), 200);
         }
         return mockResponse('', 404);
       });
