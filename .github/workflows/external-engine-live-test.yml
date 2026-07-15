@@ -79,8 +79,11 @@ jobs:
         run: |
           ENGINE_NAME="CI run ${GITHUB_RUN_ID}"
           echo "ENGINE_NAME=$ENGINE_NAME" >> "$GITHUB_ENV"
+          # Ubuntu's stockfish package installs to /usr/games, which is not on the runner's PATH
+          ENGINE_BIN=$(PATH="$PATH:/usr/games" command -v stockfish)
+          echo "using engine binary: $ENGINE_BIN"
           nohup /tmp/ee-venv/bin/python /tmp/external-engine/example-provider.py \
-            --engine /usr/bin/stockfish --name "$ENGINE_NAME" \
+            --engine "$ENGINE_BIN" --name "$ENGINE_NAME" \
             > /tmp/provider.log 2>&1 &
           echo $! > /tmp/provider.pid
           registered=false

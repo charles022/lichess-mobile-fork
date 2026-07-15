@@ -62,8 +62,11 @@ coordinated with their team (see `external-engine-discussion-draft.md`).
 
    ```bash
    LICHESS_API_TOKEN=lip_*** venv/bin/python example-provider.py \
-       --engine /usr/bin/stockfish --name "Stockfish (home server)"
+       --engine /usr/games/stockfish --name "Stockfish (home server)"
    ```
+
+   (Debian/Ubuntu's `stockfish` package installs the binary to `/usr/games/stockfish`,
+   which may not be on `PATH` in non-interactive shells.)
 
    Then open <https://lichess.org/analysis>, click the engine manager (gear icon in the engine
    pane), and select your engine. Verify analysis works and that the provider log shows work.
@@ -85,7 +88,7 @@ coordinated with their team (see `external-engine-discussion-draft.md`).
    User=engine
    EnvironmentFile=/etc/lichess-engine-provider.env
    ExecStart=/opt/external-engine/venv/bin/python /opt/external-engine/example-provider.py \
-       --engine /usr/bin/stockfish --name "Stockfish (home server)"
+       --engine /usr/games/stockfish --name "Stockfish (home server)"
    Restart=on-failure
    RestartSec=5
 
