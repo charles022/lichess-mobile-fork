@@ -1,0 +1,185 @@
+name: External engine live protocol test
+
+# Validates the external engine feature against the real Lichess API and broker
+# (lichess.org + engine.lichess.ovh), using the reference provider from
+# https://github.com/lichess-org/external-engine with Stockfish, driven by the
+# protocol spike CLI (tool/external_engine_spike.dart).
+#
+# It automates the "Validation checklist" in docs/external-engine.md:
+#   - list works with a raw personal access token
+#   - whether list works with the app's HMAC-signed bearer form (recorded, not asserted)
+#   - analyse streams eval lines; cp point-of-view confirmed with a black-winning position
+#   - closing the connection cancels the work (provider log uploaded as artifact)
+#   - behavior when the provider is down (recorded, not asserted)
+#
+# Requirements: a repository secret LICHESS_API_TOKEN containing a Lichess personal
+# access token with the engine:read and engine:write scopes. Create one at
+# https://lichess.org/account/oauth/token/create?scopes[]=engine:read&scopes[]=engine:write&description=CI+external+engine
+#
+# The run registers a temporary engine named "CI run <run id>" on the token's account
+# and deletes all "CI run *" engines at the end (including strays from earlier runs).
+#
+# Without the secret, the workflow still checks that the spike CLI compiles for the
+# plain Dart VM, then skips the live steps.
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - claude/mobile-engine-test-environments-yuabmi
+    paths:
+      - 'tool/external_engine_spike.dart'
+      - 'lib/src/model/auth/bearer.dart'
+      - '.github/workflows/external-engine-live-test.yml'
+
+permissions: read-all
+
+jobs:
+  protocol-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      LICHESS_API_TOKEN: ${{ secrets.LICHESS_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6.0.3
+
+      - name: 🐦 Install flutter
+        uses: subosito/flutter-action@v2.23.0
+        with:
+          cache: true
+          flutter-version-file: pubspec.yaml
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Compile the spike CLI for the Dart VM (offline check)
+        run: dart compile kernel tool/external_engine_spike.dart -o /tmp/spike.dill
+
+      - name: Check for live credentials
+        id: creds
+        run: |
+          if [ -n "$LICHESS_API_TOKEN" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::LICHESS_API_TOKEN secret is not set — live protocol checks were skipped. Add a personal access token with engine:read and engine:write scopes to run them."
+          fi
+
+      - name: Install Stockfish and the reference provider
+        if: steps.creds.outputs.available == 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y stockfish
+          git clone --depth 1 https://github.com/lichess-org/external-engine.git /tmp/external-engine
+          python3 -m venv /tmp/ee-venv
+          /tmp/ee-venv/bin/pip install -r /tmp/external-engine/requirements.txt
+
+      - name: Start the provider and wait for engine registration
+        if: steps.creds.outputs.available == 'true'
+        run: |
+          ENGINE_NAME="CI run ${GITHUB_RUN_ID}"
+          echo "ENGINE_NAME=$ENGINE_NAME" >> "$GITHUB_ENV"
+          nohup /tmp/ee-venv/bin/python /tmp/external-engine/example-provider.py \
+            --engine /usr/bin/stockfish --name "$ENGINE_NAME" \
+            > /tmp/provider.log 2>&1 &
+          echo $! > /tmp/provider.pid
+          registered=false
+          for i in $(seq 1 30); do
+            if curl -sf -H "Authorization: Bearer $LICHESS_API_TOKEN" \
+                https://lichess.org/api/external-engine \
+                | jq -e --arg n "$ENGINE_NAME" '.[] | select(.name == $n)' > /dev/null; then
+              registered=true
+              break
+            fi
+            sleep 2
+          done
+          if [ "$registered" != true ]; then
+            echo "::error::provider did not register the engine within 60s"
+            cat /tmp/provider.log
+            exit 1
+          fi
+          echo "engine registered as: $ENGINE_NAME"
+
+      - name: Checklist — list engines with a raw bearer token
+        if: steps.creds.outputs.available == 'true'
+        run: |
+          set -o pipefail
+          dart run tool/external_engine_spike.dart list | tee /tmp/list.out
+          grep -F "$ENGINE_NAME" /tmp/list.out
+
+      - name: Checklist — list engines with the HMAC-signed bearer form (recorded, not asserted)
+        if: steps.creds.outputs.available == 'true'
+        run: |
+          set -o pipefail
+          if dart run tool/external_engine_spike.dart list --signed | tee /tmp/list-signed.out; then
+            echo "::notice::signed bearer form ACCEPTED by lichess.org"
+          else
+            echo "::warning::signed bearer form REJECTED by lichess.org — the app's session auth may not work for /api/external-engine; see docs/external-engine.md open questions"
+          fi
+
+      - name: Checklist — analyse streams evals, cp point of view, cancellation
+        if: steps.creds.outputs.available == 'true'
+        run: |
+          set -o pipefail
+          ENGINE_ID=$(curl -sf -H "Authorization: Bearer $LICHESS_API_TOKEN" \
+            https://lichess.org/api/external-engine \
+            | jq -r --arg n "$ENGINE_NAME" '.[] | select(.name == $n) | .id')
+          echo "ENGINE_ID=$ENGINE_ID" >> "$GITHUB_ENV"
+          timeout 90 dart run tool/external_engine_spike.dart analyse "$ENGINE_ID" --cancel-after=8 \
+            | tee /tmp/analyse.out
+          # eval lines were streamed
+          grep -q '"pvs"' /tmp/analyse.out
+          # the spike analyses a position where the side to move (black) is clearly winning:
+          # a positive cp confirms scores are from the side to move's point of view, which is
+          # the assumption baked into the app's score flip (external_engine_repository.dart)
+          first_cp=$(grep -o '"cp": *-\?[0-9]*' /tmp/analyse.out | head -1 | grep -o '\-\?[0-9]*$' || true)
+          if [ -z "$first_cp" ]; then
+            echo "::error::no cp score found in the eval stream (only mate scores?) — cannot confirm point of view"
+            exit 1
+          fi
+          echo "first cp seen: $first_cp"
+          if [ "$first_cp" -le 0 ]; then
+            echo "::error::cp is not positive for a black-to-move winning position — the side-to-move point-of-view assumption is WRONG"
+            exit 1
+          fi
+          echo "--- provider log after cancellation ---"
+          tail -20 /tmp/provider.log
+
+      - name: Checklist — behavior when the provider is down (recorded, not asserted)
+        if: steps.creds.outputs.available == 'true'
+        run: |
+          kill "$(cat /tmp/provider.pid)" || true
+          sleep 3
+          echo "provider stopped; sending analyse to see how the broker responds (tunes the app's first-line timeout, currently 8s)"
+          set +e
+          timeout 30 dart run tool/external_engine_spike.dart analyse "$ENGINE_ID" --cancel-after=20 \
+            > /tmp/provider-down.out 2>&1
+          status=$?
+          set -e
+          echo "spike exit status with provider down: $status (124 = still hanging after 30s)"
+          cat /tmp/provider-down.out
+
+      - name: Clean up CI engines registered on the account
+        if: always() && steps.creds.outputs.available == 'true'
+        run: |
+          for id in $(curl -sf -H "Authorization: Bearer $LICHESS_API_TOKEN" \
+              https://lichess.org/api/external-engine \
+              | jq -r '.[] | select(.name | startswith("CI run ")) | .id'); do
+            echo "deleting engine $id"
+            curl -sf -X DELETE -H "Authorization: Bearer $LICHESS_API_TOKEN" \
+              "https://lichess.org/api/external-engine/$id" || true
+          done
+
+      - name: Upload logs
+        if: always() && steps.creds.outputs.available == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: external-engine-live-test-logs
+          path: |
+            /tmp/provider.log
+            /tmp/list.out
+            /tmp/list-signed.out
+            /tmp/analyse.out
+            /tmp/provider-down.out
+          if-no-files-found: ignore
+          retention-days: 14

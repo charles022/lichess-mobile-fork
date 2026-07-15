@@ -131,8 +131,9 @@ coordinated with their team (see `external-engine-discussion-draft.md`).
 - Cancellation is by closing the HTTP connection (the broker watches for it); there is no
   explicit stop endpoint on the client side.
 
-Validation checklist for these notes (run against your own provider; see also
-`tool/external_engine_spike.dart`):
+Validation checklist for these notes (automated by the **External engine live protocol test**
+workflow — see `docs/external-engine-next-steps.md` for the `LICHESS_API_TOKEN` secret setup —
+or run manually against your own provider with `tool/external_engine_spike.dart`):
 
 - [ ] `list` works with a raw personal access token
 - [ ] `list` works with the app's HMAC-signed bearer form (`--signed`) — determines whether the

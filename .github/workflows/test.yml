@@ -9,6 +9,7 @@ on:
       - 'pubspec.yaml'
     branches:
       - main
+      - 'claude/**'
   pull_request:
     paths:
       - 'lib/**'

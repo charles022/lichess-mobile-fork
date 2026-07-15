@@ -1,66 +1,132 @@
-# External engine — open hurdles (sandbox-actionable)
+# External engine — testing status and next steps
 
-Status: the feature is merged (`219c7e1`) and its 23 unit tests pass, but those tests
-mock the broker (`MockClient`) and the local engine (`FakeStockfish`) — no real provider,
-no real Lichess login, no real broker connection has ever been exercised. See
-`docs/external-engine.md` for the full design and the (still entirely unchecked) manual
-validation checklists.
+Status: the feature is merged (`219c7e1`) and its 23 unit tests pass. Real-network
+validation is now automated in GitHub Actions (see below); what remains manual is the
+on-device E2E checklist in `docs/external-engine.md`.
 
-This file lists the issues that can be investigated **from the sandbox** (no phone, no
-personal Lichess account, no server required). A later agent should find the right
-approach — these are the problems, not the solutions.
+## Test environment decision
 
-## Environment constraints (already confirmed — don't re-litigate)
+**GitHub Actions on this fork is the execution environment for all automated testing.**
+Evaluated against containers, VMs and cloud instances (Cloudflare was the stated
+preference if a cloud were needed), Actions wins on every axis that matters here:
 
-- No hardware virtualization (`/dev/kvm` absent) → no Android emulator, so the real app
-  cannot be run here.
-- The agent proxy blocks egress to `lichess.org` and `engine.lichess.ovh` (403 CONNECT) →
-  nothing here can reach the real API or broker.
-- No Lichess credentials are available in this environment (and none should be handled here).
+- Already enabled and proven on the fork: the `Build sideload APK` workflow has run
+  successfully, and the `Tests` workflow runs on every push.
+- Runners have unrestricted egress to `lichess.org` and `engine.lichess.ovh` (the
+  agent sandbox proxy blocks both, so live tests can *only* run in CI or on user
+  hardware).
+- Repository secrets keep the Lichess token out of agent/sandbox hands entirely.
+- Linux runners expose `/dev/kvm`, so a hardware-accelerated Android emulator is
+  available if automated on-device tests are built later (the agent sandbox has no
+  KVM).
+- Free for a public repo, no new accounts or infrastructure, and an agent session can
+  trigger runs and read logs through the GitHub API — so the whole loop (edit → push →
+  execute → diagnose) closes without human relay.
 
-So anything requiring a live broker, a real login, or an on-device run is **out of scope
-for the sandbox** and belongs to a human/hardware pass. Everything below is code/analysis
-work that does not need those.
+Cloudflare specifically has no fitting product: Workers are V8 isolates (no processes,
+no Stockfish), and Cloudflare Containers provide neither KVM nor a persistent
+Android-capable VM. A generic VPS (any vendor) would work for hosting a *long-lived
+provider daemon* later, but adds credential and infrastructure management with no
+benefit for test execution.
 
-## Hurdles to resolve
+## Test tiers
 
-1. **OAuth scope mismatch (highest priority).** The app requests only `web:mobile`
-   (`lib/src/model/auth/auth_repository.dart`), but listing engines
-   (`GET /api/external-engine`, used by `ExternalEngineRepository.listEngines`) is
-   documented to need `engine:read`. As built the settings list may always come up empty.
-   Determine whether the scope must change and what the re-login implications are.
+| Tier | What | Where | Status |
+|------|------|-------|--------|
+| 0 | Unit tests (mocked broker/engine) | `Tests` workflow, now also on `claude/**` branches | ✅ automated |
+| 1 | Live protocol validation (real provider + broker + API) | `External engine live protocol test` workflow | ✅ automated, needs `LICHESS_API_TOKEN` secret |
+| 2 | On-device E2E (UI, login, fallback UX) | Sideload APK on a phone | manual checklist in `docs/external-engine.md` |
 
-2. **Verify the analyse request/response contract against the documented protocol.**
-   The protocol notes in `docs/external-engine.md` were written "as observed" and are
-   unverified. Cross-check the request body builder and the ND-JSON eval parser
-   (`external_engine_repository.dart`) against those notes — field names, the single
-   search-limit rule, `multiPv`/`threads`/`hash` clamping, and the score point-of-view
-   flip — for internal consistency.
+### Tier 1: the live protocol workflow
 
-3. **The protocol spike CLI (`tool/external_engine_spike.dart`) has no automated coverage.**
-   It is the intended tool for validating auth/protocol against a live provider, yet nothing
-   confirms it even builds or that its argument/auth handling is correct before someone
-   points it at real hardware. Make it trustworthy offline.
+`.github/workflows/external-engine-live-test.yml` installs Stockfish and the reference
+provider (`lichess-org/external-engine`), registers a temporary engine named
+`CI run <run id>` on the token's account, and drives `tool/external_engine_spike.dart`
+against the real API and broker. It automates the validation checklist from
+`docs/external-engine.md`:
 
-4. **Fallback / watchdog behavior is only tested against synthetic streams.** Review the
-   connect/stall watchdogs and the offline-fallback path
-   (`evaluation_service.dart`, `external_engine_client.dart`) for edge cases the current
-   tests don't cover (e.g. partial lines, mid-stream errors, session reuse, timeout tuning).
+- `list` with a raw personal access token — **asserted**
+- `list --signed` (the app's HMAC-signed bearer form) — **recorded** as a
+  notice/warning, not asserted, because the answer decides whether the app needs auth
+  changes (hurdle 1 below)
+- `analyse` streams eval lines — **asserted**
+- `cp` scores are from the side to move's point of view (black-winning position must
+  yield positive cp) — **asserted**; this is the assumption behind the app's score flip
+- cancellation by closing the connection — provider log uploaded as an artifact for
+  inspection
+- behavior when the provider is down — **recorded** (exit status + output), to tune the
+  app's 8s first-line timeout
 
-5. **The sideload build path is unverified.** `.github/workflows/build-apk.yml` and the
-   release-build instructions have never been run/validated. Confirm the workflow is
-   sound (inputs, signing config expectations, `--dart-define`s) without needing to
-   actually ship an APK.
+CI engines are deleted from the account at the end of every run (including strays from
+earlier failed runs).
 
-6. **Provider setup ergonomics.** The runbook in `docs/external-engine.md` is manual
-   prose. Anything that makes standing up a provider more turnkey (so the eventual
-   hardware pass is faster) is useful groundwork.
+**One-time setup (repo owner):** create a Lichess personal access token with the
+`engine:read` and `engine:write` scopes at
+<https://lichess.org/account/oauth/token/create?scopes[]=engine:read&scopes[]=engine:write&description=CI+external+engine>
+and save it as the repository secret `LICHESS_API_TOKEN`
+(Settings → Secrets and variables → Actions). Then trigger the workflow from the
+Actions tab (or push to the workflow's branch). Without the secret the workflow only
+verifies that the spike CLI compiles, and skips the live steps with a notice.
 
-## Handoff to a hardware/account pass (context only — NOT sandbox work)
+## Hurdles — updated
 
-For the record, the following require a real server, a real Lichess account, and a
-KVM-capable host or physical phone, and cannot be done here:
+1. **OAuth scope mismatch (open, highest priority).** The app requests only
+   `web:mobile` but `GET /api/external-engine` is documented to need `engine:read`.
+   The live workflow's `--signed` step provides evidence about the bearer form; the
+   scope question itself is only fully answered with a real app session token, i.e. on
+   device (or by reading the lila source). If the scope must change,
+   `lib/src/model/auth/auth_repository.dart` needs `engine:read` added and users must
+   re-login.
 
-- Running the reference provider + Stockfish and registering it with an account.
-- Executing `external_engine_spike.dart` against the live broker.
-- Walking the on-device E2E checklist in `docs/external-engine.md`.
+2. **Analyse request/response contract (automated).** Tier 1 asserts eval-line shape
+   and cp point of view against the real broker on every run.
+
+3. **Spike CLI coverage (fixed).** The spike could not previously run on the plain
+   Dart VM at all: it imported `bearer.dart`, which pulled in the Flutter-only
+   `constants.dart`. `kLichessWSSecret` now lives in `bearer.dart` (no Flutter
+   dependency) and CI compiles the spike on every relevant push.
+
+4. **Fallback / watchdog edge cases (open).** Connect/stall watchdogs and the
+   offline-fallback path are still only tested against synthetic streams. The Tier 1
+   provider-down step records real broker behavior to inform timeout tuning; deeper
+   edge cases (partial lines, mid-stream errors, session reuse) remain unit-test work.
+
+5. **Sideload build path (validated).** The `Build sideload APK` workflow ran
+   successfully on 2026-07-14 (run 1, `main`).
+
+6. **Provider setup ergonomics (improved).** The live workflow doubles as an executable
+   version of the provider runbook: its steps are exactly the commands a human needs on
+   a server, kept green by CI.
+
+### Also fixed while setting this up
+
+The `Tests` workflow was red on `main`: the (correct) ND-JSON newline-splitting from
+`dbbecc9` broke the opening explorer tests, whose mocked `/player` responses were
+pretty-printed multi-line JSON. The fixtures are now normalized to single-line ND-JSON
+at the mock sites (`test/model/explorer/opening_explorer_repository_test.dart`,
+`test/view/explorer/opening_explorer_screen_test.dart`).
+
+## Possible Tier 2 automation (not built)
+
+Runners have KVM, so a `ReactiveCircus/android-emulator-runner` job could boot the app
+and drive `integration_test` flows. The blocker is authentication: the app signs in via
+an OAuth browser flow that a Flutter integration test cannot drive, and live-account
+credentials in CI raise fair-play questions for a chess engine feature. Options, in
+rough order of preference:
+
+- run `lila-docker` (with the `lila-engine` broker service) inside the workflow and
+  point the app at it with `--dart-define=LICHESS_HOST=...` — hermetic, test accounts,
+  no secrets, but a heavy setup;
+- add a test-only session seeding path (inject a token into `SessionStorage` from an
+  env var) — small app change, works against live lichess with a secret.
+
+Until one of those is built, Tier 2 stays the manual on-device checklist in
+`docs/external-engine.md`.
+
+## Handoff to a hardware/account pass (unchanged)
+
+Still requiring a human with a phone and account:
+
+- Walking the on-device E2E checklist in `docs/external-engine.md` with the sideloaded
+  APK.
+- Confirming the OAuth scope behavior with a real app session (hurdle 1).

@@ -36,7 +36,8 @@ void main() {
         return mockResponse(lichessOpeningExplorerResponse, 200);
       }
       if (request.url.path == '/player') {
-        return mockResponse(playerOpeningExplorerResponse, 200);
+        // the player endpoint streams ND-JSON: the whole object must be on a single line
+        return mockResponse(jsonEncode(jsonDecode(playerOpeningExplorerResponse)), 200);
       }
     }
     return mockResponse('', 404);
