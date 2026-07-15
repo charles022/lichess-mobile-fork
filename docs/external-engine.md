@@ -118,7 +118,7 @@ coordinated with their team (see `external-engine-discussion-draft.md`).
    while it is computing. Long-press the engine button for status; if the engine is offline a
    Retry action appears there.
 
-## Protocol notes (as observed, July 2026)
+## Protocol notes (verified against the live broker, 2026-07-15)
 
 - `GET https://lichess.org/api/external-engine` → `[{id, name, clientSecret, userId,
   maxThreads, maxHash, variants, providerData}]`, OAuth scope `engine:read`.
@@ -126,8 +126,11 @@ coordinated with their team (see `external-engine-discussion-draft.md`).
   `{clientSecret, work: {sessionId, threads, hash, multiPv, variant, initialFen, moves,
   movetime|depth|nodes}}` (exactly one search limit; there is no `infinite` — the app sends
   `movetime`). Response is chunked ND-JSON; each line is
-  `{time, depth, nodes, pvs: [{moves, cp|mate, depth}]}` with scores from the side to move's
-  point of view (the app flips them to white PoV, mirroring its UCI parsing).
+  `{time, depth, nodes, pvs: [{moves, cp|mate, depth}]}` with scores from **white's point of
+  view** — unlike raw UCI, no flip is needed. Verified live: a black-to-move winning position
+  streams cp ≈ -800. (An earlier draft of these notes wrongly assumed side-to-move PoV and the
+  app flipped scores accordingly, which would have inverted the eval whenever black was to
+  move — the live protocol test caught it.)
 - Reusing a `sessionId` across requests keeps the provider's hash table; a new session triggers
   `ucinewgame`. The app uses one session per analysis screen.
 - The broker caps `multiPv` at 5 and clamps `threads`/`hash` to the engine's registered maxima.

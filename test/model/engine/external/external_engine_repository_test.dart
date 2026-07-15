@@ -150,7 +150,7 @@ void main() {
       ],
     };
 
-    test('maps a white-to-move snapshot without flipping', () {
+    test('maps a white-to-move snapshot', () {
       final eval = externalEngineEvalFromJson(snapshot, work: makeWork());
 
       expect(eval, isNotNull);
@@ -165,17 +165,19 @@ void main() {
       expect(eval.threatMode, isFalse);
     });
 
-    test('flips the score for black to move', () {
+    test('keeps the score unchanged for black to move (broker scores are white-anchored)', () {
+      // Verified against the live broker: a black-to-move winning position streams negative
+      // cp, so scores are from white's point of view already — unlike raw UCI, no flip.
       final eval = externalEngineEvalFromJson(
         snapshot,
         work: makeWork(initialPosition: blackToMovePosition),
       );
 
-      expect(eval!.cp, -35);
-      expect(eval.pvs[1].cp, -30);
+      expect(eval!.cp, 35);
+      expect(eval.pvs[1].cp, 30);
     });
 
-    test('flips mate scores too', () {
+    test('keeps mate scores unchanged too', () {
       final mateSnapshot = {
         'time': 500,
         'depth': 30,
@@ -189,23 +191,23 @@ void main() {
         ],
       };
 
-      final whitePov = externalEngineEvalFromJson(mateSnapshot, work: makeWork());
-      expect(whitePov!.mate, 1);
-      expect(whitePov.cp, isNull);
+      final whiteToMove = externalEngineEvalFromJson(mateSnapshot, work: makeWork());
+      expect(whiteToMove!.mate, 1);
+      expect(whiteToMove.cp, isNull);
 
-      final blackPov = externalEngineEvalFromJson(
+      final blackToMove = externalEngineEvalFromJson(
         mateSnapshot,
         work: makeWork(initialPosition: blackToMovePosition),
       );
-      expect(blackPov!.mate, -1);
+      expect(blackToMove!.mate, 1);
     });
 
-    test('flips with the black pivot in threat mode', () {
-      // threat mode on a white-to-move position: the engine analyses black to move, so the
-      // score comes from black's point of view and must be flipped to stay white-positive
+    test('keeps the score unchanged in threat mode', () {
+      // the broker analyses the flipped position but still reports white-anchored scores,
+      // which is what LocalEval carries in threat mode as well
       final eval = externalEngineEvalFromJson(snapshot, work: makeWork(threatMode: true));
 
-      expect(eval!.cp, -35);
+      expect(eval!.cp, 35);
       expect(eval.threatMode, isTrue);
       expect(eval.position.turn, Side.black);
     });

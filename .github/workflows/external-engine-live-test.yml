@@ -132,17 +132,18 @@ jobs:
             | tee /tmp/analyse.out
           # eval lines were streamed
           grep -q '"pvs"' /tmp/analyse.out
-          # the spike analyses a position where the side to move (black) is clearly winning:
-          # a positive cp confirms scores are from the side to move's point of view, which is
-          # the assumption baked into the app's score flip (external_engine_repository.dart)
+          # the spike analyses a position where black (the side to move) is clearly winning:
+          # a NEGATIVE cp confirms scores are from white's point of view, which is what the
+          # app relies on (no UCI-style flip; see external_engine_repository.dart). Verified
+          # live on 2026-07-15: the broker streamed cp around -800 for this position.
           first_cp=$(grep -o '"cp": *-\?[0-9]*' /tmp/analyse.out | head -1 | grep -o '\-\?[0-9]*$' || true)
           if [ -z "$first_cp" ]; then
             echo "::error::no cp score found in the eval stream (only mate scores?) — cannot confirm point of view"
             exit 1
           fi
           echo "first cp seen: $first_cp"
-          if [ "$first_cp" -le 0 ]; then
-            echo "::error::cp is not positive for a black-to-move winning position — the side-to-move point-of-view assumption is WRONG"
+          if [ "$first_cp" -ge 0 ]; then
+            echo "::error::cp is not negative for a black-to-move winning position — scores are no longer white-anchored and the app's parsing (external_engine_repository.dart) must be revisited"
             exit 1
           fi
           echo "--- provider log after cancellation ---"
