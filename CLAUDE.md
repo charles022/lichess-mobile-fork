@@ -2,6 +2,15 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## This fork's purpose
+
+This is a fork of the upstream lichess-mobile app. Its purpose is adding **external engine
+support**: powering position analysis with the user's own engine through the Lichess External
+Engine API. Feature status, verified facts, and open items live in
+`docs/external-engine-next-steps.md`; design, protocol notes, and runbooks in
+`docs/external-engine.md`. When asked to "continue the external engine work" (or similar),
+start from those two documents.
+
 ## Project Overview
 
 Lichess Mobile is a Flutter-based mobile application (iOS/Android) for lichess.org. The app uses:
