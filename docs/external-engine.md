@@ -141,13 +141,17 @@ Validation checklist for these notes (automated by the **External engine live pr
 workflow — see `docs/external-engine-next-steps.md` for the `LICHESS_API_TOKEN` secret setup —
 or run manually against your own provider with `tool/external_engine_spike.dart`):
 
-- [ ] `list` works with a raw personal access token
-- [ ] `list` works with the app's HMAC-signed bearer form (`--signed`) — determines whether the
-      app needs auth changes upstream
-- [ ] analyse streams eval lines; `cp` PoV confirmed with the spike's black-winning position
-- [ ] closing the connection stops the provider (watch its logs)
-- [ ] behavior when the provider is stopped: does analyse hang or return an error? (tunes the
-      app's first-line timeout, currently 8s)
+- [x] `list` works with a raw personal access token (HTTP 200, run 4, 2026-07-15)
+- [x] `list` works with the app's HMAC-signed bearer form (`--signed`) — **accepted** by
+      lichess.org (HTTP 200), so the app's bearer signing needs no changes for this endpoint
+- [x] analyse streams eval lines; `cp` PoV confirmed with the spike's black-winning position:
+      **white-anchored** (cp ≈ -890), see the protocol notes above
+- [x] closing the connection cancels the request cleanly at the broker (client sees the close
+      immediately; provider log uploaded as a run artifact)
+- [x] behavior when the provider is stopped: the broker holds the analyse request for ~15s and
+      then returns **HTTP 503** and closes the stream — no indefinite hang. The app's 8s
+      first-line watchdog fires before that, so the offline fallback kicks in even earlier;
+      the timeout needs no tuning.
 
 ## End-to-end test checklist (on device)
 
