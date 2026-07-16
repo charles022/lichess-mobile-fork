@@ -63,8 +63,10 @@ CI engines are deleted from the account at the end of every run (including stray
 earlier failed runs).
 
 **One-time setup (repo owner):** create a Lichess personal access token with the
-`engine:read` and `engine:write` scopes at
-<https://lichess.org/account/oauth/token/create?scopes[]=engine:read&scopes[]=engine:write&description=CI+external+engine>
+`engine:read` and `engine:write` scopes (plus `preference:read`, recommended so the
+Tier 2 seeded app session can also read account preferences instead of getting a
+tolerated 403) at
+<https://lichess.org/account/oauth/token/create?scopes[]=engine:read&scopes[]=engine:write&scopes[]=preference:read&description=CI+external+engine>
 and save it as the repository secret `LICHESS_API_TOKEN`
 (Settings → Secrets and variables → Actions). Then trigger the workflow from the
 Actions tab (or push to the workflow's branch). Without the secret the workflow only

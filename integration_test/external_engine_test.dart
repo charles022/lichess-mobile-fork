@@ -103,6 +103,11 @@ void main() {
         reason: 'tapping the engine should select it (check mark on its tile)',
       );
 
+      // Leave the settings screen so its engine tile (which also contains the engine name)
+      // cannot satisfy the analysis-screen finders below.
+      navigator.pop();
+      await tester.pump(const Duration(milliseconds: 500));
+
       // ---- Fresh analysis session: evals are streamed by the external engine ----
 
       navigator.push(
@@ -118,10 +123,18 @@ void main() {
         ),
       );
 
+      // Wait for the analysis screen to be fully loaded: its bottom bar (which hosts the
+      // engine button) only appears once the controller state has resolved, which involves
+      // real network work (socket connection, engine list).
+      await pumpUntil(tester, find.byType(EngineButton), timeout: const Duration(minutes: 2));
+
       // While the external engine computes, its name is shown under the engine chip.
       await pumpUntil(
         tester,
-        find.textContaining(kEngineNameLabelPrefix),
+        find.descendant(
+          of: find.byType(EngineButton),
+          matching: find.textContaining(kEngineNameLabelPrefix),
+        ),
         timeout: const Duration(minutes: 1),
       );
 
