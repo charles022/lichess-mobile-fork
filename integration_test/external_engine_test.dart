@@ -284,7 +284,14 @@ void main() {
         await tester.tap(find.byKey(const ValueKey('goto-previous')));
         await tester.pump(const Duration(milliseconds: 150));
       }
-      for (var i = 0; i < 4; i++) {
+      // Scrub forward to ply 5, NOT back to the initial ply 6: ply 6 already has a
+      // full-length eval cached from the earlier phases, and the app (by design) serves such
+      // positions from cache without starting any engine work — no external work means the
+      // label under the chip stays on the local engine and the assertion below could never
+      // match (run 29514550666). Ply 5 has never been fully evaluated, so the external engine
+      // must actually run. (Transient mid-scrub requests can't poison this: a cached eval
+      // only wins with searchTime >= the requested 4s.)
+      for (var i = 0; i < 3; i++) {
         await tester.tap(find.byKey(const ValueKey('goto-next')));
         await tester.pump(const Duration(milliseconds: 150));
       }
@@ -305,10 +312,15 @@ void main() {
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
       await tester.pump(const Duration(seconds: 1));
 
-      // The app is still responsive and a fresh evaluation reaches the external engine.
+      // The app is still responsive after resume: toggling the engine off and on works (the
+      // current ply-5 eval is now cached, so this alone starts no external work — see the
+      // scrubbing phase note)...
       await tester.tap(find.byType(EngineButton));
       await tester.pump(const Duration(milliseconds: 500));
       await tester.tap(find.byType(EngineButton));
+      await tester.pump(const Duration(milliseconds: 500));
+      // ...and a fresh evaluation (ply 4 has no cached eval) reaches the external engine.
+      await tester.tap(find.byKey(const ValueKey('goto-previous')));
       await pumpUntil(
         tester,
         find.descendant(
