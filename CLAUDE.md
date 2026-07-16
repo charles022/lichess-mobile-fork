@@ -462,6 +462,13 @@ This installs the pinned Flutter version, applies a **local-only** `pubspec.yaml
 (system sqlite3 for tests), and runs pub get + build_runner. **Never commit the pubspec.yaml
 change it makes** — exclude it when staging, or `git checkout -- pubspec.yaml` first.
 
+## Waiting on CI runs / long-running jobs
+
+When you kick off a workflow, Actions run, or long test and then go idle until a later
+check-in (scheduled wake-up, end of turn), tell the user the timing in your reply: when the
+run started, and when you plan to check back on it. Approximate times (UTC or relative,
+e.g. "started 17:17Z, checking back in ~25 min") are fine.
+
 ## Debugging
 
 ```bash
