@@ -13,8 +13,7 @@ response bodies, so the analyse ND-JSON lines never reached Dart. The fix is
 pipeline: first eval line in 1.2–5.3s, ~19 evals over the 4s movetime, stream completes
 ~1s after movetime, `stop()` cancellation preserved.
 
-State of the E2E phases as of run #17 (`5bdb0e1`, in progress at time of writing —
-started ~2026-07-16 22:45Z, expected to conclude within ~45 min of that):
+State of the E2E phases as of run #18 (`5bdb0e1`, concluded 2026-07-16 23:29Z):
 
 - **Proven passing** (run #15 attempt 2): settings selection, honest streaming assertion,
   offline fallback + snackbar, retry, go-deeper (popup opens via the `openEnginePopup`
@@ -34,21 +33,28 @@ Run log of this session, for context on flakiness:
 | #15 a1 | `72a8d16` | runner crashed mid-emulator-step (logs 404) — re-ran |
 | #15 a2 | `72a8d16` | go-deeper PASSED via fallback; scrubbing failed on the eval-cache rule |
 | #16 | `a78d378` | hung to the 90-min job timeout (emulator/tool wedge, phase unknown — its jobs API 503'd; step log worth re-checking later) |
-| #17 | `5bdb0e1` | added 45-min step timeout; in progress |
+| #18 | `5bdb0e1` | **hang reproduced** — killed by the new 45-min step timeout at 23:29Z (job run 29540298077); artifact again tiny (provider.log+control.log, no logcat), so the test step never finished |
 
 ### Picking this up in a fresh session
 
-1. Check run #17 (workflow `external-engine-e2e-test.yml`, branch
-   `claude/android-external-engine-stream-tfyfag`) via the GitHub MCP actions tools.
-2. **Green** → update `docs/external-engine.md` (drop the red-workflow status caveat) and
-   `docs/external-engine-next-steps.md` (record the cronet→dart:io fix), commit, merge to
-   main.
-3. **Red with test output** → read the `[E2E:...]` timestamped diagnostics in the step
-   log (`get_job_logs`, `failed_only`, tail ~300); the failing phase is almost certainly
-   one of the five "unproven" ones above. Mind gotchas 2 and 3 below.
-4. **Step timed out at 45 min** → the #16 hang is reproducible; the preserved step-log
-   tail now shows which phase it died in. Suspect the late phases (variant switch /
-   server-side deletion / netdown) or an emulator freeze.
+1. **First: read run 29540298077's step log** (`get_job_logs`, run_id 29540298077,
+   `failed_only`, `return_content`, tail ~300 — retry later if the jobs API 503s, which
+   it did repeatedly on 2026-07-16). Unlike run #16, this log EXISTS (the step-level
+   timeout preserved it). The last `[E2E:...]` timestamped line pinpoints the phase that
+   hangs. The 612-byte log artifact (id 8392718477) holds provider.log/control.log —
+   the control.log lines show whether `/pause`, `/resume` or `/netdown` were reached
+   (the sandbox proxy blocks the artifact blob host; the step log embeds the same info).
+2. The hang is in test content introduced/reached via `a78d378` (`5bdb0e1` only added
+   the timeout): everything through the retry phase is proven, so suspect the newly
+   reachable stretch — post-scrub ply-5 wait, backgrounding (`handleAppLifecycleStateChanged`
+   + goto-previous at ply 4), variant switch, server-side deletion, or netdown. Every
+   in-test wait is deadline-bounded and the dart-side test timeout is 25 min, so a
+   >45 min wedge means the emulator, adb, or `flutter test`'s device connection died —
+   check the step log for where output stops.
+3. Once fixed and green → update `docs/external-engine.md` (drop the red-workflow status
+   caveat) and `docs/external-engine-next-steps.md` (record the cronet→dart:io fix),
+   commit, merge to main.
+4. Mind gotchas 2 and 3 below when touching label assertions or popups.
 5. GitHub API 503s and runner crashes both happened this session — re-run before
    assuming a regression.
 
