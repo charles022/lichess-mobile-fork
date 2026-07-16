@@ -33,4 +33,16 @@ void main() {
     await tester.pump(kRequestEvalDebounceDelay + kEngineEvalEmissionThrottleDelay);
     expect(find.widgetWithText(EngineButton, '16'), findsOne);
   });
+
+  testWidgets('long-press opens the engine popup', (tester) async {
+    await makeEngineTestApp(tester, isCloudEvalEnabled: false, gameId: const GameId('xze7RH66'));
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.pump(kRequestEvalDebounceDelay + kEngineEvalEmissionThrottleDelay);
+    expect(find.widgetWithText(EngineButton, '16'), findsOne);
+
+    await tester.longPress(find.byType(EngineButton));
+    await tester.pump();
+
+    expect(find.byType(ListTile), findsOneWidget, reason: 'the engine popup should be open');
+  });
 }

@@ -195,7 +195,7 @@ void main() {
 
       await controlCommand('resume');
 
-      await tester.longPress(find.byType(EngineButton));
+      await longPressFor(tester, find.byType(EngineButton));
       await pumpUntil(tester, find.byIcon(Icons.refresh), timeout: const Duration(seconds: 15));
       expect(
         find.textContaining('is offline'),
@@ -245,8 +245,7 @@ void main() {
 
       var goDeeperVisible = false;
       for (var attempt = 0; attempt < 12 && !goDeeperVisible; attempt++) {
-        await tester.longPress(find.byType(EngineButton));
-        await tester.pump(const Duration(milliseconds: 300));
+        await longPressFor(tester, find.byType(EngineButton));
         dumpGoDeeperState(attempt, 'after long-press');
         final deadline = DateTime.now().add(const Duration(seconds: 10));
         while (DateTime.now().isBefore(deadline)) {
@@ -484,6 +483,28 @@ Future<void> controlCommand(String command) async {
 /// Formats [time] as `HH:mm:ss.SSS` for in-test diagnostics (the CI runner buffers the whole
 /// test output, so its own per-line timestamps all show the flush time).
 String timestamp(DateTime time) => time.toIso8601String().substring(11, 23);
+
+/// Long-presses the widget matched by [finder], holding the pointer down for real wall-clock
+/// time.
+///
+/// `tester.longPress` cannot be used here: it holds the pointer via
+/// `pump(kLongPressTimeout + kPressTimeout)`, and on the live (on-device) binding a pump's
+/// duration is not reliably honored as wall-clock time — when the UI is static the pointer-up
+/// arrives before the 500ms long-press timeout, so the gesture resolves as a tap and the
+/// long-press recognizer never fires. This is why the engine-popup long-press worked while the
+/// UI was animating (spinners force real frame time between pumps) but silently did nothing on
+/// an idle screen. Same class of problem as `pumpAndSettle` never settling — see the
+/// DateTime-deadline pump helpers below.
+Future<void> longPressFor(WidgetTester tester, Finder finder) async {
+  final gesture = await tester.startGesture(tester.getCenter(finder));
+  // comfortably above kLongPressTimeout (500ms)
+  final end = DateTime.now().add(const Duration(milliseconds: 700));
+  while (DateTime.now().isBefore(end)) {
+    await tester.pump(const Duration(milliseconds: 50));
+  }
+  await gesture.up();
+  await tester.pump(const Duration(milliseconds: 300));
+}
 
 /// Pumps frames until [finder] matches at least one widget, or fails after [timeout].
 ///
