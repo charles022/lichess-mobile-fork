@@ -89,6 +89,9 @@ class ExternalEngineClient {
       'threatMode=${work.threatMode}',
     );
 
+    final watch = Stopwatch()..start();
+    var evalCount = 0;
+
     externalEngineAnalyseStream(client: client, spec: spec, sessionId: sessionId, work: work).then((
       stream,
     ) {
@@ -98,12 +101,23 @@ class ExternalEngineClient {
           if (generation != _generation) return;
           _restartWatchdog(generation, work, kExternalEngineStallTimeout);
           _status.value = .connected;
+          evalCount++;
+          if (evalCount == 1) {
+            _logger.info('First eval line after ${watch.elapsedMilliseconds}ms');
+          } else {
+            _logger.fine(
+              'Eval #$evalCount (depth ${eval.depth}) after ${watch.elapsedMilliseconds}ms',
+            );
+          }
           onEval?.call((work, eval));
         },
         onError: (Object error) => _fail(generation, work, error),
         onDone: () {
           if (generation != _generation) return;
           _watchdog?.cancel();
+          _logger.info(
+            'Analysis stream completed after ${watch.elapsedMilliseconds}ms ($evalCount evals)',
+          );
           onDone?.call();
         },
       );

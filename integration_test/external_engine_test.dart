@@ -41,6 +41,7 @@ import 'dart:io';
 
 import 'package:dartchess/dartchess.dart' show Side;
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:lichess_mobile/main.dart' as app;
@@ -52,6 +53,7 @@ import 'package:lichess_mobile/src/model/auth/auth_controller.dart';
 import 'package:lichess_mobile/src/model/auth/auth_storage.dart';
 import 'package:lichess_mobile/src/model/common/chess.dart';
 import 'package:lichess_mobile/src/model/common/id.dart';
+import 'package:lichess_mobile/src/model/engine/evaluation_service.dart';
 import 'package:lichess_mobile/src/model/user/user.dart';
 import 'package:lichess_mobile/src/utils/string.dart';
 import 'package:lichess_mobile/src/view/analysis/analysis_screen.dart';
@@ -92,11 +94,16 @@ void main() {
       // Surface the external engine client's own log records: the app only prints an
       // allow-list of loggers to the console (see AppLogService), which hides the actual
       // failure reason when an external request dies.
+      // Include the record time: the CI runner buffers the whole test output, so its own
+      // per-line timestamps are useless for reconstructing in-test timing. EvaluationService
+      // records are printed by the app too, but without times — the timestamped copies here
+      // are what make the engine-state timeline readable.
       Logger.root.onRecord.listen((record) {
-        if (record.loggerName == 'ExternalEngineClient') {
+        if (record.loggerName == 'ExternalEngineClient' ||
+            record.loggerName == 'EvaluationService') {
           debugPrint(
-            '[E2E:${record.loggerName}] ${record.level.name}: ${record.message}'
-            '${record.error != null ? ' (${record.error})' : ''}',
+            '[E2E:${record.loggerName}] ${timestamp(record.time)} ${record.level.name}: '
+            '${record.message}${record.error != null ? ' (${record.error})' : ''}',
           );
         }
       });
@@ -216,10 +223,31 @@ void main() {
       // the search can run well past its nominal 4s.
       await pumpFor(tester, const Duration(seconds: 8));
 
+      // Diagnostics for the attempts below: the engine/eval state comes straight from the
+      // service, independent of what the popup renders.
+      final evaluationService = ProviderScope.containerOf(
+        tester.element(find.byType(Navigator).first),
+        listen: false,
+      ).read(evaluationServiceProvider);
+      void dumpGoDeeperState(int attempt, String when) {
+        final evalSt = evaluationService.evaluationState.value;
+        debugPrint(
+          '[E2E:goDeeper] ${timestamp(DateTime.now())} attempt=$attempt $when: '
+          'engineState=${evalSt.state.name} extStatus=${evaluationService.externalEngineStatus.value.name} '
+          'work=${evalSt.currentWork != null} isDeeper=${evalSt.currentWork?.isDeeper} '
+          'evalDepth=${evalSt.eval?.depth} | widgets: '
+          'goDeeperIcon=${find.byIcon(Icons.add_circle_outlined).evaluate().length} '
+          'refreshIcon=${find.byIcon(Icons.refresh).evaluate().length} '
+          'offlineText=${find.textContaining('is offline').evaluate().length} '
+          'popupTiles=${find.byType(ListTile).evaluate().length}',
+        );
+      }
+
       var goDeeperVisible = false;
       for (var attempt = 0; attempt < 12 && !goDeeperVisible; attempt++) {
         await tester.longPress(find.byType(EngineButton));
         await tester.pump(const Duration(milliseconds: 300));
+        dumpGoDeeperState(attempt, 'after long-press');
         final deadline = DateTime.now().add(const Duration(seconds: 10));
         while (DateTime.now().isBefore(deadline)) {
           await tester.pump(const Duration(milliseconds: 200));
@@ -233,6 +261,7 @@ void main() {
             await tester.pump(const Duration(milliseconds: 500));
           }
         }
+        dumpGoDeeperState(attempt, 'at deadline');
         if (!goDeeperVisible) {
           // Close the popup (if open) before trying again.
           await dismissPopover(tester);
@@ -451,6 +480,10 @@ Future<void> controlCommand(String command) async {
     client.close();
   }
 }
+
+/// Formats [time] as `HH:mm:ss.SSS` for in-test diagnostics (the CI runner buffers the whole
+/// test output, so its own per-line timestamps all show the flush time).
+String timestamp(DateTime time) => time.toIso8601String().substring(11, 23);
 
 /// Pumps frames until [finder] matches at least one widget, or fails after [timeout].
 ///
