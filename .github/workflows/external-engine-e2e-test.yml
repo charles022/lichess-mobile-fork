@@ -33,6 +33,7 @@ on:
       - 'integration_test/**'
       - '.github/workflows/external-engine-e2e-test.yml'
       - '.github/scripts/e2e_provider_control.py'
+      - '.github/scripts/run_e2e_test.sh'
 
 permissions: read-all
 
@@ -139,6 +140,8 @@ jobs:
       - name: Run the E2E test on the emulator
         if: steps.creds.outputs.available == 'true'
         uses: reactivecircus/android-emulator-runner@v2
+        env:
+          LICHESS_WS_SECRET: ${{ secrets.WS_SECRET }}
         with:
           api-level: 34
           arch: x86_64
@@ -146,20 +149,9 @@ jobs:
           profile: pixel_5
           disable-animations: true
           emulator-options: -no-snapshot -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
-          script: |
-            set +e
-            flutter test integration_test/external_engine_test.dart \
-              -d emulator-5554 \
-              --timeout none \
-              --dart-define=LICHESS_HOST=lichess.org \
-              --dart-define=LICHESS_WS_HOST=socket.lichess.org \
-              --dart-define=cronetHttpNoPlay=true \
-              --dart-define=E2E_LICHESS_TOKEN="$LICHESS_API_TOKEN" \
-              --dart-define=E2E_ENGINE_NAME="$ENGINE_NAME" \
-              ${{ secrets.WS_SECRET != '' && format('--dart-define=LICHESS_WS_SECRET={0}', secrets.WS_SECRET) || '' }}
-            status=$?
-            adb logcat -d > /tmp/logcat.txt || true
-            exit $status
+          # the action runs each `script` line as a separate shell invocation, so the
+          # actual test run lives in a script file
+          script: ./.github/scripts/run_e2e_test.sh
 
       - name: Clean up E2E engines registered on the account
         if: always() && steps.creds.outputs.available == 'true'
