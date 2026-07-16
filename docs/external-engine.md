@@ -155,10 +155,20 @@ or run manually against your own provider with `tool/external_engine_spike.dart`
 
 ## End-to-end test checklist (on device)
 
-- [ ] Fresh analysis session with external engine: gauge/lines/depth update, engine name shown
+The items marked **automated** run in CI on every relevant push via the
+**External engine E2E test (emulator)** workflow
+(`.github/workflows/external-engine-e2e-test.yml`), which boots the app on an Android
+emulator and drives `integration_test/external_engine_test.dart` against the real API and
+broker — see `docs/external-engine-next-steps.md` for how it works. The rest still needs a
+manual pass on a phone.
+
+- [x] Fresh analysis session with external engine: engine listed and selectable in settings,
+      evals stream, engine name shown — **automated**
+- [x] Kill the provider mid-analysis: snackbar appears, analysis continues on local engine —
+      **automated** (provider is paused via SIGSTOP)
+- [x] Restart the provider, long-press engine button → Retry: external analysis resumes —
+      **automated**
 - [ ] Rapid move scrubbing: no stale evals, provider log shows cancelled work
-- [ ] Kill the provider mid-analysis: snackbar appears, analysis continues on local engine
-- [ ] Restart the provider, long-press engine button → Retry: external analysis resumes
 - [ ] Delete the engine server-side: settings shows stale entry, analysis falls back to local
 - [ ] Log out / switch account: analysis falls back to local, no crash
 - [ ] Variant study not supported by the engine: local engine used silently

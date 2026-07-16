@@ -1,0 +1,188 @@
+name: External engine E2E test (emulator)
+
+# Tier 2 of the external engine test plan (docs/external-engine-next-steps.md): runs the real
+# app on a hardware-accelerated Android emulator against the real Lichess API and broker
+# (lichess.org + engine.lichess.ovh), with the reference provider from
+# https://github.com/lichess-org/external-engine running Stockfish on the workflow host.
+#
+# It automates the device-independent parts of the "End-to-end test checklist" in
+# docs/external-engine.md via integration_test/external_engine_test.dart:
+#   - the registered engine appears in Settings → Chess engine and can be selected
+#   - a fresh analysis session streams evals from the external engine (name shown)
+#   - provider down: offline snackbar, fallback to the local engine
+#   - provider back + Retry: external analysis resumes
+#
+# Authentication: the test seeds the app's session storage with the LICHESS_API_TOKEN
+# secret (a personal access token with engine:read and engine:write scopes — the same secret
+# the live protocol workflow uses). No user login credentials are needed. Create the token at
+# https://lichess.org/account/oauth/token/create?scopes[]=engine:read&scopes[]=engine:write&description=CI+external+engine
+#
+# The run registers a temporary engine named "E2E CI <run id>" on the token's account and
+# deletes all "E2E CI *" engines at the end (including strays from earlier failed runs).
+#
+# Without the secret, the workflow only verifies that the integration test compiles, and
+# skips the emulator run with a notice.
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - 'claude/**'
+    paths:
+      - 'integration_test/**'
+      - '.github/workflows/external-engine-e2e-test.yml'
+      - '.github/scripts/e2e_provider_control.py'
+
+permissions: read-all
+
+# The cleanup step deletes every "E2E CI *" engine on the account, so two runs must not
+# overlap or one would delete the other's engine mid-test.
+concurrency:
+  group: external-engine-e2e
+  cancel-in-progress: false
+
+jobs:
+  e2e-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      LICHESS_API_TOKEN: ${{ secrets.LICHESS_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6.0.3
+
+      - name: Check for live credentials
+        id: creds
+        run: |
+          if [ -n "$LICHESS_API_TOKEN" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::LICHESS_API_TOKEN secret is not set — the emulator E2E run was skipped. Add a personal access token with engine:read and engine:write scopes to run it."
+          fi
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5.2.0
+        with:
+          java-version: 17
+          distribution: temurin
+
+      - name: 🐦 Install flutter
+        uses: subosito/flutter-action@v2.23.0
+        with:
+          cache: true
+          flutter-version-file: pubspec.yaml
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Code generation
+        run: dart run build_runner build
+
+      - name: Analyze the integration test (offline check)
+        run: flutter analyze integration_test
+
+      - name: Enable KVM for the emulator
+        if: steps.creds.outputs.available == 'true'
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Install Stockfish and the reference provider
+        if: steps.creds.outputs.available == 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y stockfish
+          git clone --depth 1 https://github.com/lichess-org/external-engine.git /tmp/external-engine
+          python3 -m venv /tmp/ee-venv
+          /tmp/ee-venv/bin/pip install -r /tmp/external-engine/requirements.txt
+
+      - name: Start the provider and wait for engine registration
+        if: steps.creds.outputs.available == 'true'
+        run: |
+          ENGINE_NAME="E2E CI ${GITHUB_RUN_ID}"
+          echo "ENGINE_NAME=$ENGINE_NAME" >> "$GITHUB_ENV"
+          # Ubuntu's stockfish package installs to /usr/games, which is not on the runner's PATH
+          ENGINE_BIN=$(PATH="$PATH:/usr/games" command -v stockfish)
+          echo "using engine binary: $ENGINE_BIN"
+          nohup /tmp/ee-venv/bin/python /tmp/external-engine/example-provider.py \
+            --engine "$ENGINE_BIN" --name "$ENGINE_NAME" \
+            > /tmp/provider.log 2>&1 &
+          echo $! > /tmp/provider.pid
+          registered=false
+          for i in $(seq 1 30); do
+            if curl -sf -H "Authorization: Bearer $LICHESS_API_TOKEN" \
+                https://lichess.org/api/external-engine \
+                | jq -e --arg n "$ENGINE_NAME" '.[] | select(.name == $n)' > /dev/null; then
+              registered=true
+              break
+            fi
+            sleep 2
+          done
+          if [ "$registered" != true ]; then
+            echo "::error::provider did not register the engine within 60s"
+            cat /tmp/provider.log
+            exit 1
+          fi
+          echo "engine registered as: $ENGINE_NAME"
+
+      - name: Start the provider control server
+        if: steps.creds.outputs.available == 'true'
+        run: |
+          nohup python3 .github/scripts/e2e_provider_control.py "$(cat /tmp/provider.pid)" 8899 \
+            > /tmp/control.log 2>&1 &
+          sleep 1
+          curl -sf http://127.0.0.1:8899/health
+
+      - name: Run the E2E test on the emulator
+        if: steps.creds.outputs.available == 'true'
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          target: google_apis
+          profile: pixel_5
+          disable-animations: true
+          emulator-options: -no-snapshot -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          script: |
+            set +e
+            flutter test integration_test/external_engine_test.dart \
+              -d emulator-5554 \
+              --timeout none \
+              --dart-define=LICHESS_HOST=lichess.org \
+              --dart-define=LICHESS_WS_HOST=socket.lichess.org \
+              --dart-define=cronetHttpNoPlay=true \
+              --dart-define=E2E_LICHESS_TOKEN="$LICHESS_API_TOKEN" \
+              --dart-define=E2E_ENGINE_NAME="$ENGINE_NAME" \
+              ${{ secrets.WS_SECRET != '' && format('--dart-define=LICHESS_WS_SECRET={0}', secrets.WS_SECRET) || '' }}
+            status=$?
+            adb logcat -d > /tmp/logcat.txt || true
+            exit $status
+
+      - name: Clean up E2E engines registered on the account
+        if: always() && steps.creds.outputs.available == 'true'
+        run: |
+          # resume the provider in case the test failed while it was paused, so cleanup
+          # of its registration on the account is not racing a stopped process
+          kill -CONT "$(cat /tmp/provider.pid)" 2>/dev/null || true
+          for id in $(curl -sf -H "Authorization: Bearer $LICHESS_API_TOKEN" \
+              https://lichess.org/api/external-engine \
+              | jq -r '.[] | select(.name | startswith("E2E CI ")) | .id'); do
+            echo "deleting engine $id"
+            curl -sf -X DELETE -H "Authorization: Bearer $LICHESS_API_TOKEN" \
+              "https://lichess.org/api/external-engine/$id" || true
+          done
+
+      - name: Upload logs
+        if: always() && steps.creds.outputs.available == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: external-engine-e2e-test-logs
+          path: |
+            /tmp/provider.log
+            /tmp/control.log
+            /tmp/logcat.txt
+          if-no-files-found: ignore
+          retention-days: 14
