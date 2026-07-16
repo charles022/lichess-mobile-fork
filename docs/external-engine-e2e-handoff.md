@@ -4,6 +4,45 @@ Written 2026-07-16 at the end of the session that built the emulator E2E pipelin
 (PR #7, PR #8, and the PR carrying this document). **Read this first when picking the
 work back up.**
 
+## Progress update (2026-07-16, streaming-fix session — branch `claude/android-external-engine-stream-tfyfag`)
+
+**The streaming bug below is FIXED** (`66ca4af`): cronet (Android) buffers streamed
+response bodies, so the analyse ND-JSON lines never reached Dart. The fix is
+`HttpClientFactory.createStreamingClient()` — a `dart:io` `IOClient` used by
+`ExternalEngineClient` for the analyse request on all platforms. Verified on the E2E
+pipeline: first eval line in 1.2–5.3s, ~19 evals over the 4s movetime, stream completes
+~1s after movetime, `stop()` cancellation preserved.
+
+State of the E2E phases as of run #16 (`a78d378`, in progress at time of writing):
+
+- **Proven passing**: settings selection, honest streaming assertion, offline
+  fallback + snackbar, retry, go-deeper (popup opens via the `openEnginePopup` fallback;
+  deeper request goes out with max search time), scrubbing cancel/restart requests.
+- **Unproven yet** (rewritten in `a78d378`, awaiting a green run): post-scrub external
+  label at ply 5, post-resume label at ply 4, unsupported variant, server-side deletion,
+  airplane mode.
+
+Hard-won gotchas from this session (beyond the list at the bottom of this doc):
+
+1. **The workflow does not trigger on `lib/**` pushes** — its `paths` filter only covers
+   `integration_test/**`, the workflow, and the scripts. For app-code changes, dispatch it
+   manually (`workflow_dispatch`).
+2. **Live-binding long-presses are unreliable**: synthetic pointer holds only register
+   while the UI is animating/rendering frames. `tester.longPress` (and even a wall-clock
+   hold) silently does nothing on a static screen. Use `openEnginePopup` /
+   `longPressFor` in the test; the real gesture is covered by
+   `test/view/engine/engine_button_test.dart`.
+3. **The eval cache defeats label assertions**: a position with a cached eval of
+   `searchTime >=` the requested 4s is served from cache — no engine work starts, `work`
+   is cleared, and the chip label shows the *local* engine. Phases asserting the external
+   engine's label must end on a never-fully-evaluated position.
+4. **Runner crashes happen**: run #15 attempt 1 died mid-emulator-step (job failed with
+   the test step stuck `in_progress`, logs 404). Just re-run.
+
+Remaining plan: on a green run, update `docs/external-engine.md` (drop the red-workflow
+status caveat) and `docs/external-engine-next-steps.md` (record the bug + fix), then merge
+to main. The sections below are the original handoff, kept for the full diagnosis record.
+
 ## TL;DR
 
 - The on-device E2E pipeline works end-to-end in GitHub Actions (emulator, seeded

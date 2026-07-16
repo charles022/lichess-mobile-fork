@@ -77,7 +77,10 @@ class ExternalEngineClient {
     final generation = _generation;
 
     _status.value = .connecting;
-    final client = _client = _clientFactory();
+    // A `dart:io`-backed client, not the platform-native default: cronet (Android) buffers
+    // streamed response bodies, so the analyse stream's small ND-JSON lines never arrive in
+    // time (see HttpClientFactory.createStreamingClient).
+    final client = _client = _clientFactory.createStreamingClient();
     _restartWatchdog(generation, work, kExternalEngineFirstLineTimeout);
 
     _logger.info(
@@ -85,6 +88,9 @@ class ExternalEngineClient {
       'options: multiPv=${work.multiPv}, searchTime=${work.searchTime.inMilliseconds}ms, '
       'threatMode=${work.threatMode}',
     );
+
+    final watch = Stopwatch()..start();
+    var evalCount = 0;
 
     externalEngineAnalyseStream(client: client, spec: spec, sessionId: sessionId, work: work).then((
       stream,
@@ -95,12 +101,23 @@ class ExternalEngineClient {
           if (generation != _generation) return;
           _restartWatchdog(generation, work, kExternalEngineStallTimeout);
           _status.value = .connected;
+          evalCount++;
+          if (evalCount == 1) {
+            _logger.info('First eval line after ${watch.elapsedMilliseconds}ms');
+          } else {
+            _logger.fine(
+              'Eval #$evalCount (depth ${eval.depth}) after ${watch.elapsedMilliseconds}ms',
+            );
+          }
           onEval?.call((work, eval));
         },
         onError: (Object error) => _fail(generation, work, error),
         onDone: () {
           if (generation != _generation) return;
           _watchdog?.cancel();
+          _logger.info(
+            'Analysis stream completed after ${watch.elapsedMilliseconds}ms ($evalCount evals)',
+          );
           onDone?.call();
         },
       );

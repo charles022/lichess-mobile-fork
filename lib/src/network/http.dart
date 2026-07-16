@@ -49,10 +49,12 @@ Uri lichessUri(String unencodedPath, [Map<String, dynamic>? queryParameters]) =>
 class HttpClientFactory {
   const HttpClientFactory({this.wrapper});
 
+  static const _userAgent = 'Lichess Mobile';
+
   final Client Function(Client client)? wrapper;
 
   Client _createClient() {
-    const userAgent = 'Lichess Mobile';
+    const userAgent = _userAgent;
     try {
       if (Platform.isAndroid) {
         final engine = CronetEngine.build(
@@ -76,6 +78,25 @@ class HttpClientFactory {
 
   Client call() {
     final client = _createClient();
+    return wrapper?.call(client) ?? client;
+  }
+
+  /// Creates a client backed by `dart:io` sockets regardless of platform, for long-lived
+  /// streaming responses.
+  ///
+  /// The platform-native clients may buffer streamed response bodies instead of delivering
+  /// small chunks promptly: with cronet (Android), the few-hundred-byte ND-JSON lines of the
+  /// external engine analyse stream never reach the Dart stream at all — every request dies on
+  /// the first-line watchdog while the provider is demonstrably streaming (verified on the E2E
+  /// emulator pipeline; see docs/external-engine-e2e-handoff.md). `dart:io` delivers each chunk
+  /// as it arrives on the socket, and the Tier 1 spike proves it streams the broker endpoint
+  /// fine. Used on all platforms for consistency (NSURLSession is suspected of the same class
+  /// of buffering).
+  ///
+  /// Closing the returned client aborts the in-flight request ([IOClient.close] force-closes
+  /// the underlying connections), which callers rely on for cancellation.
+  Client createStreamingClient() {
+    final client = IOClient(HttpClient()..userAgent = _userAgent);
     return wrapper?.call(client) ?? client;
   }
 }

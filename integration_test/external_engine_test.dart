@@ -41,6 +41,7 @@ import 'dart:io';
 
 import 'package:dartchess/dartchess.dart' show Side;
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:lichess_mobile/main.dart' as app;
@@ -52,11 +53,13 @@ import 'package:lichess_mobile/src/model/auth/auth_controller.dart';
 import 'package:lichess_mobile/src/model/auth/auth_storage.dart';
 import 'package:lichess_mobile/src/model/common/chess.dart';
 import 'package:lichess_mobile/src/model/common/id.dart';
+import 'package:lichess_mobile/src/model/engine/evaluation_service.dart';
 import 'package:lichess_mobile/src/model/user/user.dart';
 import 'package:lichess_mobile/src/utils/string.dart';
 import 'package:lichess_mobile/src/view/analysis/analysis_screen.dart';
 import 'package:lichess_mobile/src/view/engine/engine_button.dart';
 import 'package:lichess_mobile/src/view/settings/engine_settings_screen.dart';
+import 'package:lichess_mobile/src/widgets/buttons.dart';
 import 'package:logging/logging.dart';
 
 const kE2EToken = String.fromEnvironment('E2E_LICHESS_TOKEN');
@@ -92,11 +95,16 @@ void main() {
       // Surface the external engine client's own log records: the app only prints an
       // allow-list of loggers to the console (see AppLogService), which hides the actual
       // failure reason when an external request dies.
+      // Include the record time: the CI runner buffers the whole test output, so its own
+      // per-line timestamps are useless for reconstructing in-test timing. EvaluationService
+      // records are printed by the app too, but without times — the timestamped copies here
+      // are what make the engine-state timeline readable.
       Logger.root.onRecord.listen((record) {
-        if (record.loggerName == 'ExternalEngineClient') {
+        if (record.loggerName == 'ExternalEngineClient' ||
+            record.loggerName == 'EvaluationService') {
           debugPrint(
-            '[E2E:${record.loggerName}] ${record.level.name}: ${record.message}'
-            '${record.error != null ? ' (${record.error})' : ''}',
+            '[E2E:${record.loggerName}] ${timestamp(record.time)} ${record.level.name}: '
+            '${record.message}${record.error != null ? ' (${record.error})' : ''}',
           );
         }
       });
@@ -188,7 +196,7 @@ void main() {
 
       await controlCommand('resume');
 
-      await tester.longPress(find.byType(EngineButton));
+      await openEnginePopup(tester);
       await pumpUntil(tester, find.byIcon(Icons.refresh), timeout: const Duration(seconds: 15));
       expect(
         find.textContaining('is offline'),
@@ -216,10 +224,30 @@ void main() {
       // the search can run well past its nominal 4s.
       await pumpFor(tester, const Duration(seconds: 8));
 
+      // Diagnostics for the attempts below: the engine/eval state comes straight from the
+      // service, independent of what the popup renders.
+      final evaluationService = ProviderScope.containerOf(
+        tester.element(find.byType(Navigator).first),
+        listen: false,
+      ).read(evaluationServiceProvider);
+      void dumpGoDeeperState(int attempt, String when) {
+        final evalSt = evaluationService.evaluationState.value;
+        debugPrint(
+          '[E2E:goDeeper] ${timestamp(DateTime.now())} attempt=$attempt $when: '
+          'engineState=${evalSt.state.name} extStatus=${evaluationService.externalEngineStatus.value.name} '
+          'work=${evalSt.currentWork != null} isDeeper=${evalSt.currentWork?.isDeeper} '
+          'evalDepth=${evalSt.eval?.depth} | widgets: '
+          'goDeeperIcon=${find.byIcon(Icons.add_circle_outlined).evaluate().length} '
+          'refreshIcon=${find.byIcon(Icons.refresh).evaluate().length} '
+          'offlineText=${find.textContaining('is offline').evaluate().length} '
+          'popupTiles=${find.byType(ListTile).evaluate().length}',
+        );
+      }
+
       var goDeeperVisible = false;
       for (var attempt = 0; attempt < 12 && !goDeeperVisible; attempt++) {
-        await tester.longPress(find.byType(EngineButton));
-        await tester.pump(const Duration(milliseconds: 300));
+        await openEnginePopup(tester);
+        dumpGoDeeperState(attempt, 'after long-press');
         final deadline = DateTime.now().add(const Duration(seconds: 10));
         while (DateTime.now().isBefore(deadline)) {
           await tester.pump(const Duration(milliseconds: 200));
@@ -233,6 +261,7 @@ void main() {
             await tester.pump(const Duration(milliseconds: 500));
           }
         }
+        dumpGoDeeperState(attempt, 'at deadline');
         if (!goDeeperVisible) {
           // Close the popup (if open) before trying again.
           await dismissPopover(tester);
@@ -255,7 +284,14 @@ void main() {
         await tester.tap(find.byKey(const ValueKey('goto-previous')));
         await tester.pump(const Duration(milliseconds: 150));
       }
-      for (var i = 0; i < 4; i++) {
+      // Scrub forward to ply 5, NOT back to the initial ply 6: ply 6 already has a
+      // full-length eval cached from the earlier phases, and the app (by design) serves such
+      // positions from cache without starting any engine work — no external work means the
+      // label under the chip stays on the local engine and the assertion below could never
+      // match (run 29514550666). Ply 5 has never been fully evaluated, so the external engine
+      // must actually run. (Transient mid-scrub requests can't poison this: a cached eval
+      // only wins with searchTime >= the requested 4s.)
+      for (var i = 0; i < 3; i++) {
         await tester.tap(find.byKey(const ValueKey('goto-next')));
         await tester.pump(const Duration(milliseconds: 150));
       }
@@ -276,10 +312,15 @@ void main() {
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
       await tester.pump(const Duration(seconds: 1));
 
-      // The app is still responsive and a fresh evaluation reaches the external engine.
+      // The app is still responsive after resume: toggling the engine off and on works (the
+      // current ply-5 eval is now cached, so this alone starts no external work — see the
+      // scrubbing phase note)...
       await tester.tap(find.byType(EngineButton));
       await tester.pump(const Duration(milliseconds: 500));
       await tester.tap(find.byType(EngineButton));
+      await tester.pump(const Duration(milliseconds: 500));
+      // ...and a fresh evaluation (ply 4 has no cached eval) reaches the external engine.
+      await tester.tap(find.byKey(const ValueKey('goto-previous')));
       await pumpUntil(
         tester,
         find.descendant(
@@ -450,6 +491,61 @@ Future<void> controlCommand(String command) async {
   } finally {
     client.close();
   }
+}
+
+/// Formats [time] as `HH:mm:ss.SSS` for in-test diagnostics (the CI runner buffers the whole
+/// test output, so its own per-line timestamps all show the flush time).
+String timestamp(DateTime time) => time.toIso8601String().substring(11, 23);
+
+/// Long-presses the widget matched by [finder], holding the pointer down for real wall-clock
+/// time.
+///
+/// `tester.longPress` cannot be used here: it holds the pointer via
+/// `pump(kLongPressTimeout + kPressTimeout)`, and on the live (on-device) binding a pump's
+/// duration is not reliably honored as wall-clock time — when the UI is static the pointer-up
+/// arrives before the 500ms long-press timeout, so the gesture resolves as a tap and the
+/// long-press recognizer never fires. This is why the engine-popup long-press worked while the
+/// UI was animating (spinners force real frame time between pumps) but silently did nothing on
+/// an idle screen. Same class of problem as `pumpAndSettle` never settling — see the
+/// DateTime-deadline pump helpers below.
+Future<void> longPressFor(WidgetTester tester, Finder finder) async {
+  final gesture = await tester.startGesture(tester.getCenter(finder));
+  // comfortably above kLongPressTimeout (500ms)
+  final end = DateTime.now().add(const Duration(milliseconds: 700));
+  var jitter = 0.25;
+  while (DateTime.now().isBefore(end)) {
+    // Micro-moves well within the touch slop (18px): on the live binding, the synthetic
+    // pointer stream is only reliably delivered while the pointer stays active and frames
+    // render — a stationary hold on a static screen never reaches the recognizer (observed
+    // in run 29511726394: identical holds worked while a spinner was animating and did
+    // nothing on an idle screen).
+    await gesture.moveBy(Offset(jitter, 0));
+    jitter = -jitter;
+    await tester.pump(const Duration(milliseconds: 50));
+  }
+  await gesture.up();
+  await tester.pump(const Duration(milliseconds: 300));
+}
+
+/// Opens the engine popup (the popover shown by long-pressing [EngineButton]).
+///
+/// Tries the real long-press gesture first; if the popup (its `ListTile` body) is not up
+/// after two tries, invokes the button's `onLongPress` callback directly. The gesture
+/// mechanics themselves are covered by widget tests (`test/view/engine/engine_button_test.dart`);
+/// what this E2E test needs from the popup is its *content* against the real engine state.
+Future<void> openEnginePopup(WidgetTester tester) async {
+  for (var i = 0; i < 2; i++) {
+    await longPressFor(tester, find.byType(EngineButton));
+    if (find.byType(ListTile).evaluate().isNotEmpty) return;
+  }
+  debugPrint('[E2E] long-press gesture did not open the engine popup, invoking onLongPress');
+  tester
+      .widget<SemanticIconButton>(
+        find.descendant(of: find.byType(EngineButton), matching: find.byType(SemanticIconButton)),
+      )
+      .onLongPress
+      ?.call();
+  await tester.pump(const Duration(milliseconds: 300));
 }
 
 /// Pumps frames until [finder] matches at least one widget, or fails after [timeout].
