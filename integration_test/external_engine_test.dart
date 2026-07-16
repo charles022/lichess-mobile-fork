@@ -57,6 +57,7 @@ import 'package:lichess_mobile/src/utils/string.dart';
 import 'package:lichess_mobile/src/view/analysis/analysis_screen.dart';
 import 'package:lichess_mobile/src/view/engine/engine_button.dart';
 import 'package:lichess_mobile/src/view/settings/engine_settings_screen.dart';
+import 'package:logging/logging.dart';
 
 const kE2EToken = String.fromEnvironment('E2E_LICHESS_TOKEN');
 const kE2EEngineName = String.fromEnvironment('E2E_ENGINE_NAME', defaultValue: 'E2E CI');
@@ -87,6 +88,18 @@ void main() {
         isNotEmpty,
         reason: 'pass --dart-define=E2E_LICHESS_TOKEN=<personal access token>',
       );
+
+      // Surface the external engine client's own log records: the app only prints an
+      // allow-list of loggers to the console (see AppLogService), which hides the actual
+      // failure reason when an external request dies.
+      Logger.root.onRecord.listen((record) {
+        if (record.loggerName == 'ExternalEngineClient') {
+          debugPrint(
+            '[E2E:${record.loggerName}] ${record.level.name}: ${record.message}'
+            '${record.error != null ? ' (${record.error})' : ''}',
+          );
+        }
+      });
 
       await seedAuthenticatedSession();
 
@@ -138,15 +151,19 @@ void main() {
       // real network work (socket connection, engine list).
       await pumpUntil(tester, find.byType(EngineButton), timeout: const Duration(minutes: 2));
 
-      // While the external engine computes, its name is shown under the engine chip.
-      await pumpUntil(
-        tester,
+      // While the external engine computes, its name is shown under the engine chip AND the
+      // chip shows a depth number — both at once proves eval lines actually streamed from
+      // the external engine (the name alone also shows while merely connecting).
+      await pumpUntilAll(tester, [
         find.descendant(
           of: find.byType(EngineButton),
           matching: find.textContaining(kEngineNameLabelPrefix),
         ),
-        timeout: const Duration(minutes: 1),
-      );
+        find.descendant(
+          of: find.byType(EngineButton),
+          matching: find.textContaining(RegExp(r'^\d{1,2}$')),
+        ),
+      ], timeout: const Duration(minutes: 1));
 
       // ---- Provider goes down: snackbar + fallback to the local engine ----
 
@@ -466,6 +483,23 @@ Future<void> pumpFor(WidgetTester tester, Duration duration) async {
   final end = DateTime.now().add(duration);
   while (DateTime.now().isBefore(end)) {
     await tester.pump(const Duration(milliseconds: 500));
+  }
+}
+
+/// Pumps frames until every finder in [finders] matches in the same frame, or fails after
+/// [timeout].
+Future<void> pumpUntilAll(
+  WidgetTester tester,
+  List<Finder> finders, {
+  Duration timeout = const Duration(seconds: 30),
+}) async {
+  final deadline = DateTime.now().add(timeout);
+  while (!finders.every((finder) => finder.evaluate().isNotEmpty)) {
+    if (DateTime.now().isAfter(deadline)) {
+      final missing = finders.where((finder) => finder.evaluate().isEmpty).toList();
+      fail('pumpUntilAll timed out after $timeout; still missing: $missing');
+    }
+    await tester.pump(const Duration(milliseconds: 100));
   }
 }
 
