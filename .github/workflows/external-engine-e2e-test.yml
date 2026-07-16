@@ -141,6 +141,11 @@ jobs:
 
       - name: Run the E2E test on the emulator
         if: steps.creds.outputs.available == 'true'
+        # Bound emulator/tool-side hangs (the in-test waits are all deadline-bounded, but a
+        # frozen emulator or a device drop can wedge `flutter test` itself — run #16 burned
+        # the full 90-minute job timeout that way, skipping the cleanup/upload steps). A
+        # step-level timeout fails the step instead, so the always() steps still run.
+        timeout-minutes: 45
         uses: reactivecircus/android-emulator-runner@v2
         env:
           LICHESS_WS_SECRET: ${{ secrets.WS_SECRET }}
