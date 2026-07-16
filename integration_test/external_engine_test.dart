@@ -11,7 +11,17 @@
 ///   while it computes);
 /// - when the provider goes down, the offline snackbar appears and analysis falls back to the
 ///   local engine;
-/// - after the provider is back, long-press → Retry resumes external analysis.
+/// - after the provider is back, long-press → Retry resumes external analysis;
+/// - "Go deeper" requests a deeper external search from the popup;
+/// - rapid move scrubbing cancels work cleanly and evals recover;
+/// - backgrounding (simulated app lifecycle pause/resume) leaves no stuck state;
+/// - a variant the engine doesn't support silently uses the local engine;
+/// - deleting the engine server-side falls back to the local engine;
+/// - airplane mode on the emulator: the local engine keeps working with no network.
+///
+/// Deliberately NOT covered: signing out (the app's sign-out revokes its token via
+/// `DELETE /api/token`, which would destroy the CI secret), and the `web:mobile` OAuth scope
+/// question, which needs a real login session (see docs/external-engine.md).
 ///
 /// Authentication: instead of driving the OAuth browser flow (impossible from a Flutter test),
 /// the test seeds the session storage with a personal access token before the app boots — the
@@ -47,6 +57,7 @@ import 'package:lichess_mobile/src/utils/string.dart';
 import 'package:lichess_mobile/src/view/analysis/analysis_screen.dart';
 import 'package:lichess_mobile/src/view/engine/engine_button.dart';
 import 'package:lichess_mobile/src/view/settings/engine_settings_screen.dart';
+import 'package:logging/logging.dart';
 
 const kE2EToken = String.fromEnvironment('E2E_LICHESS_TOKEN');
 const kE2EEngineName = String.fromEnvironment('E2E_ENGINE_NAME', defaultValue: 'E2E CI');
@@ -77,6 +88,18 @@ void main() {
         isNotEmpty,
         reason: 'pass --dart-define=E2E_LICHESS_TOKEN=<personal access token>',
       );
+
+      // Surface the external engine client's own log records: the app only prints an
+      // allow-list of loggers to the console (see AppLogService), which hides the actual
+      // failure reason when an external request dies.
+      Logger.root.onRecord.listen((record) {
+        if (record.loggerName == 'ExternalEngineClient') {
+          debugPrint(
+            '[E2E:${record.loggerName}] ${record.level.name}: ${record.message}'
+            '${record.error != null ? ' (${record.error})' : ''}',
+          );
+        }
+      });
 
       await seedAuthenticatedSession();
 
@@ -128,15 +151,19 @@ void main() {
       // real network work (socket connection, engine list).
       await pumpUntil(tester, find.byType(EngineButton), timeout: const Duration(minutes: 2));
 
-      // While the external engine computes, its name is shown under the engine chip.
-      await pumpUntil(
-        tester,
+      // While the external engine computes, its name is shown under the engine chip AND the
+      // chip shows a depth number — both at once proves eval lines actually streamed from
+      // the external engine (the name alone also shows while merely connecting).
+      await pumpUntilAll(tester, [
         find.descendant(
           of: find.byType(EngineButton),
           matching: find.textContaining(kEngineNameLabelPrefix),
         ),
-        timeout: const Duration(minutes: 1),
-      );
+        find.descendant(
+          of: find.byType(EngineButton),
+          matching: find.textContaining(RegExp(r'^\d{1,2}$')),
+        ),
+      ], timeout: const Duration(minutes: 1));
 
       // ---- Provider goes down: snackbar + fallback to the local engine ----
 
@@ -180,10 +207,172 @@ void main() {
       );
 
       // Dismiss the popup.
-      await tester.tapAt(const Offset(10, 100));
+      await dismissPopover(tester);
+
+      // ---- "Go deeper": a deeper external search can be requested from the popup ----
+
+      // Let the retried search finish first: the go-deeper action only appears while the
+      // engine is idle, and a provider resumed from SIGSTOP may chew through a backlog, so
+      // the search can run well past its nominal 4s.
+      await pumpFor(tester, const Duration(seconds: 8));
+
+      var goDeeperVisible = false;
+      for (var attempt = 0; attempt < 12 && !goDeeperVisible; attempt++) {
+        await tester.longPress(find.byType(EngineButton));
+        await tester.pump(const Duration(milliseconds: 300));
+        final deadline = DateTime.now().add(const Duration(seconds: 10));
+        while (DateTime.now().isBefore(deadline)) {
+          await tester.pump(const Duration(milliseconds: 200));
+          if (find.byIcon(Icons.add_circle_outlined).evaluate().isNotEmpty) {
+            goDeeperVisible = true;
+            break;
+          }
+          // If the engine dropped offline again, use the popup's Retry action.
+          if (find.byIcon(Icons.refresh).evaluate().isNotEmpty) {
+            await tester.tap(find.byIcon(Icons.refresh));
+            await tester.pump(const Duration(milliseconds: 500));
+          }
+        }
+        if (!goDeeperVisible) {
+          // Close the popup (if open) before trying again.
+          await dismissPopover(tester);
+        }
+      }
+      expect(
+        goDeeperVisible,
+        isTrue,
+        reason: 'the go-deeper action should appear once the engine goes idle',
+      );
+
+      await tester.tap(find.byIcon(Icons.add_circle_outlined));
+      // The deeper search runs and the popup shows its live depth.
+      await pumpUntil(tester, find.textContaining('Depth'), timeout: const Duration(minutes: 1));
+      await dismissPopover(tester);
+
+      // ---- Rapid move scrubbing: cancelled work is handled cleanly, evals recover ----
+
+      for (var i = 0; i < 4; i++) {
+        await tester.tap(find.byKey(const ValueKey('goto-previous')));
+        await tester.pump(const Duration(milliseconds: 150));
+      }
+      for (var i = 0; i < 4; i++) {
+        await tester.tap(find.byKey(const ValueKey('goto-next')));
+        await tester.pump(const Duration(milliseconds: 150));
+      }
+      // After the dust settles, the current position is evaluated by the external engine.
+      await pumpUntil(
+        tester,
+        find.descendant(
+          of: find.byType(EngineButton),
+          matching: find.textContaining(kEngineNameLabelPrefix),
+        ),
+        timeout: const Duration(minutes: 1),
+      );
+
+      // ---- Backgrounding (simulated lifecycle): no stuck state after resume ----
+
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      await pumpFor(tester, const Duration(seconds: 15));
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pump(const Duration(seconds: 1));
+
+      // The app is still responsive and a fresh evaluation reaches the external engine.
+      await tester.tap(find.byType(EngineButton));
       await tester.pump(const Duration(milliseconds: 500));
+      await tester.tap(find.byType(EngineButton));
+      await pumpUntil(
+        tester,
+        find.descendant(
+          of: find.byType(EngineButton),
+          matching: find.textContaining(kEngineNameLabelPrefix),
+        ),
+        timeout: const Duration(minutes: 1),
+      );
+
+      // ---- Variant not supported by the engine: local engine used silently ----
+
+      navigator.pop();
+      await tester.pump(const Duration(milliseconds: 500));
+      navigator.push(
+        AnalysisScreen.buildRoute(const AnalysisOptions.standalone(variant: Variant.antichess)),
+      );
+      await pumpUntil(tester, find.byType(EngineButton), timeout: const Duration(minutes: 1));
+      // The local engine label appears (Fairy-Stockfish computes variants)...
+      await pumpUntil(
+        tester,
+        find.descendant(of: find.byType(EngineButton), matching: find.textContaining('SF')),
+        timeout: const Duration(minutes: 1),
+      );
+      // ...and the external engine is never involved.
+      expect(
+        find.descendant(
+          of: find.byType(EngineButton),
+          matching: find.textContaining(kEngineNameLabelPrefix),
+        ),
+        findsNothing,
+        reason: 'an unsupported variant must not use the external engine',
+      );
+
+      // ---- Engine deleted server-side: analysis falls back to the local engine ----
+
+      await deleteEngineServerSide();
+
+      navigator.pop();
+      await tester.pump(const Duration(milliseconds: 500));
+      navigator.push(
+        AnalysisScreen.buildRoute(
+          const AnalysisOptions.pgn(
+            id: StringId('e2e-after-delete'),
+            orientation: Side.white,
+            pgn: kObscurePgn,
+            variant: Variant.standard,
+            isComputerAnalysisAllowed: true,
+            initialMoveCursor: 6,
+          ),
+        ),
+      );
+      await pumpUntil(tester, find.byType(EngineButton), timeout: const Duration(minutes: 1));
+
+      // The engine list is still cached, so the app tries the deleted engine, fails fast,
+      // and falls back to the local engine with the offline snackbar.
+      await pumpUntil(
+        tester,
+        find.text('External engine offline — using local engine'),
+        timeout: const Duration(minutes: 1),
+      );
+      await pumpUntil(
+        tester,
+        find.descendant(of: find.byType(EngineButton), matching: find.text('SF 16')),
+        timeout: const Duration(minutes: 1),
+      );
+
+      // ---- Airplane mode (emulator): the local engine keeps working with no network ----
+
+      await controlCommand('netdown/25');
+      await tester.pump(const Duration(seconds: 3));
+
+      await tester.tap(find.byType(EngineButton));
+      await tester.pump(const Duration(milliseconds: 500));
+      await tester.tap(find.byType(EngineButton));
+      await pumpUntil(
+        tester,
+        find.descendant(of: find.byType(EngineButton), matching: find.text('SF 16')),
+        timeout: const Duration(minutes: 1),
+      );
+      // A depth number in the chip proves the local engine is actually evaluating.
+      await pumpUntil(
+        tester,
+        find.descendant(
+          of: find.byType(EngineButton),
+          matching: find.textContaining(RegExp(r'^\d{1,2}$')),
+        ),
+        timeout: const Duration(minutes: 1),
+      );
+
+      // Let the host restore the network before finishing, so teardown is clean.
+      await pumpFor(tester, const Duration(seconds: 30));
     },
-    timeout: const Timeout(Duration(minutes: 15)),
+    timeout: const Timeout(Duration(minutes: 25)),
   );
 }
 
@@ -219,6 +408,34 @@ Future<Map<String, dynamic>> fetchJson(Uri uri) async {
   }
 }
 
+/// Deletes the E2E engine from the account with the raw bearer token, simulating a
+/// server-side removal that the app is not aware of.
+Future<void> deleteEngineServerSide() async {
+  final client = HttpClient();
+  try {
+    final listRequest = await client.getUrl(Uri.https(kLichessHost, '/api/external-engine'));
+    listRequest.headers.set('authorization', 'Bearer $kE2EToken');
+    final listResponse = await listRequest.close();
+    final body = await listResponse.transform(utf8.decoder).join();
+    if (listResponse.statusCode != 200) {
+      throw StateError('GET /api/external-engine failed with ${listResponse.statusCode}: $body');
+    }
+    final engines = (jsonDecode(body) as List<dynamic>).cast<Map<String, dynamic>>();
+    final id = engines.firstWhere((engine) => engine['name'] == kE2EEngineName)['id'] as String;
+    final deleteRequest = await client.deleteUrl(
+      Uri.https(kLichessHost, '/api/external-engine/$id'),
+    );
+    deleteRequest.headers.set('authorization', 'Bearer $kE2EToken');
+    final deleteResponse = await deleteRequest.close();
+    await deleteResponse.drain<void>();
+    if (deleteResponse.statusCode != 200) {
+      throw StateError('DELETE /api/external-engine/$id failed: ${deleteResponse.statusCode}');
+    }
+  } finally {
+    client.close();
+  }
+}
+
 /// Sends a command to the provider control server running on the workflow host
 /// (see `.github/scripts/e2e_provider_control.py`).
 Future<void> controlCommand(String command) async {
@@ -248,6 +465,39 @@ Future<void> pumpUntil(
   while (finder.evaluate().isEmpty) {
     if (DateTime.now().isAfter(deadline)) {
       fail('pumpUntil timed out after $timeout waiting for $finder');
+    }
+    await tester.pump(const Duration(milliseconds: 100));
+  }
+}
+
+/// Dismisses an open popover by tapping its barrier, at a spot that is harmless when no
+/// popover is open: the center of the app bar (an inert area — a blind corner tap could hit
+/// the back button and pop the whole screen instead).
+Future<void> dismissPopover(WidgetTester tester) async {
+  await tester.tapAt(tester.getCenter(find.byType(AppBar).first));
+  await tester.pump(const Duration(milliseconds: 500));
+}
+
+/// Pumps frames for the given [duration] of real time.
+Future<void> pumpFor(WidgetTester tester, Duration duration) async {
+  final end = DateTime.now().add(duration);
+  while (DateTime.now().isBefore(end)) {
+    await tester.pump(const Duration(milliseconds: 500));
+  }
+}
+
+/// Pumps frames until every finder in [finders] matches in the same frame, or fails after
+/// [timeout].
+Future<void> pumpUntilAll(
+  WidgetTester tester,
+  List<Finder> finders, {
+  Duration timeout = const Duration(seconds: 30),
+}) async {
+  final deadline = DateTime.now().add(timeout);
+  while (!finders.every((finder) => finder.evaluate().isNotEmpty)) {
+    if (DateTime.now().isAfter(deadline)) {
+      final missing = finders.where((finder) => finder.evaluate().isEmpty).toList();
+      fail('pumpUntilAll timed out after $timeout; still missing: $missing');
     }
     await tester.pump(const Duration(milliseconds: 100));
   }

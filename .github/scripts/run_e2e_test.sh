@@ -25,4 +25,13 @@ status=$?
 # Keep the device log for the artifact upload, pass or fail.
 adb logcat -d > /tmp/logcat.txt || true
 
+# Host- and device-side diagnostics in the step output, so failures can be diagnosed
+# without downloading the artifact.
+echo "=== provider.log (tail) ==="
+tail -n 100 /tmp/provider.log || true
+echo "=== control.log ==="
+cat /tmp/control.log || true
+echo "=== logcat: external engine lines ==="
+grep -i "e2e:\|externalengine\|external engine" /tmp/logcat.txt | tail -n 60 || true
+
 exit $status
