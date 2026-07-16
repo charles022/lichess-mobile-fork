@@ -1,8 +1,9 @@
 # External engine — testing status and next steps
 
 Status: the feature is merged (`219c7e1`) and its 23 unit tests pass. Real-network
-validation is now automated in GitHub Actions (see below); what remains manual is the
-on-device E2E checklist in `docs/external-engine.md`.
+validation and the core on-device E2E flows are now automated in GitHub Actions (see
+below); what remains manual is a short list of device-specific checks in
+`docs/external-engine.md`.
 
 ## Test environment decision
 
@@ -35,7 +36,8 @@ benefit for test execution.
 |------|------|-------|--------|
 | 0 | Unit tests (mocked broker/engine) | `Tests` workflow, now also on `claude/**` branches | ✅ automated |
 | 1 | Live protocol validation (real provider + broker + API) | `External engine live protocol test` workflow | ✅ automated, needs `LICHESS_API_TOKEN` secret |
-| 2 | On-device E2E (UI, login, fallback UX) | Sideload APK on a phone | manual checklist in `docs/external-engine.md` |
+| 2 | On-device E2E (UI, session, fallback UX) | `External engine E2E test (emulator)` workflow | ✅ automated (core flows), needs `LICHESS_API_TOKEN` secret |
+| 3 | Physical-device / account checks | Sideload APK on a phone | manual, much reduced (see `docs/external-engine.md`) |
 
 ### Tier 1: the live protocol workflow
 
@@ -113,27 +115,53 @@ pretty-printed multi-line JSON. The fixtures are now normalized to single-line N
 at the mock sites (`test/model/explorer/opening_explorer_repository_test.dart`,
 `test/view/explorer/opening_explorer_screen_test.dart`).
 
-## Possible Tier 2 automation (not built)
+## Tier 2: the emulator E2E workflow
 
-Runners have KVM, so a `ReactiveCircus/android-emulator-runner` job could boot the app
-and drive `integration_test` flows. The blocker is authentication: the app signs in via
-an OAuth browser flow that a Flutter integration test cannot drive, and live-account
-credentials in CI raise fair-play questions for a chess engine feature. Options, in
-rough order of preference:
+`.github/workflows/external-engine-e2e-test.yml` boots the real app on a
+hardware-accelerated Android emulator (`reactivecircus/android-emulator-runner`, KVM),
+with the reference provider + Stockfish running on the workflow host, and drives the UI
+with `integration_test/external_engine_test.dart` against the real lichess.org API and
+broker. It covers, from the on-device checklist:
 
-- run `lila-docker` (with the `lila-engine` broker service) inside the workflow and
-  point the app at it with `--dart-define=LICHESS_HOST=...` — hermetic, test accounts,
-  no secrets, but a heavy setup;
-- add a test-only session seeding path (inject a token into `SessionStorage` from an
-  env var) — small app change, works against live lichess with a secret.
+- the registered engine appears in Settings → Chess engine and can be selected;
+- a fresh analysis session streams evals from the external engine (name shown under the
+  engine chip);
+- provider down → offline snackbar and fallback to the local engine;
+- provider back + long-press → Retry → external analysis resumes.
 
-Until one of those is built, Tier 2 stays the manual on-device checklist in
-`docs/external-engine.md`.
+Design decisions worth knowing:
 
-## Handoff to a hardware/account pass (unchanged)
+- **Authentication without credentials.** The OAuth browser flow cannot be driven by a
+  Flutter test, and no app-code backdoor was added. Instead the test *seeds the session*
+  before the app boots: it writes an `AuthUser` (user fetched from `/api/account` +
+  token) to the exact secure-storage key `AuthStorage` uses, sets `first_run=false` so
+  `initializeApp` doesn't wipe secure storage, and then calls the production `main()`.
+  The token is the existing `LICHESS_API_TOKEN` secret — lichess accepts the app's
+  HMAC-signed bearer form for personal access tokens (verified by Tier 1), and
+  `/api/token/test` (the app's session validity check) accepts them too. **No user
+  login credentials are ever needed.**
+- **Offline fallback is exercised with SIGSTOP/SIGCONT**, not kill/restart, via a tiny
+  control server on the host (`.github/scripts/e2e_provider_control.py`, reachable from
+  the emulator at `10.0.2.2:8899`). Pausing keeps the provider's engine registration
+  (same id), so the app's Retry re-dispatches to the same engine.
+- **The analysed position is an offbeat line** (`1. h4 a5 2. Rh3 Ra6 3. Rg3 Rh6`) so no
+  deep cloud eval short-circuits the engine work.
+- Engines are registered as `E2E CI <run id>` and all `E2E CI *` engines are deleted at
+  the end of every run; a concurrency group prevents overlapping runs from deleting each
+  other's engines.
+
+The lila-docker alternative (hermetic, no secrets) remains possible but was not needed:
+the seeded-session approach required zero app changes and reuses the already-configured
+secret.
+
+## Handoff to a hardware/account pass (much reduced)
 
 Still requiring a human with a phone and account:
 
-- Walking the on-device E2E checklist in `docs/external-engine.md` with the sideloaded
-  APK.
-- Confirming the OAuth scope behavior with a real app session (hurdle 1).
+- The device-specific leftovers of the checklist in `docs/external-engine.md`
+  (backgrounding the app for 5 minutes, airplane mode, and a sanity pass of the
+  remaining unautomated items).
+- Confirming the OAuth scope behavior with a real app session (hurdle 1) — the E2E test
+  authenticates with a personal access token, not a `web:mobile` session token, so this
+  question is still only answerable with a real login on device (or by reading lila
+  source).
