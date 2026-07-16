@@ -77,7 +77,10 @@ class ExternalEngineClient {
     final generation = _generation;
 
     _status.value = .connecting;
-    final client = _client = _clientFactory();
+    // A `dart:io`-backed client, not the platform-native default: cronet (Android) buffers
+    // streamed response bodies, so the analyse stream's small ND-JSON lines never arrive in
+    // time (see HttpClientFactory.createStreamingClient).
+    final client = _client = _clientFactory.createStreamingClient();
     _restartWatchdog(generation, work, kExternalEngineFirstLineTimeout);
 
     _logger.info(

@@ -13,4 +13,9 @@ class FakeHttpClientFactory implements HttpClientFactory {
   http.Client call() {
     return _factory();
   }
+
+  @override
+  http.Client createStreamingClient() {
+    return _factory();
+  }
 }
