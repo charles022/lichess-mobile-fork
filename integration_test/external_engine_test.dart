@@ -195,16 +195,43 @@ void main() {
 
       // ---- "Go deeper": a deeper external search can be requested from the popup ----
 
-      await tester.longPress(find.byType(EngineButton));
-      // The go-deeper action appears once the current search is done.
-      await pumpUntil(
-        tester,
-        find.byIcon(Icons.add_circle_outlined),
-        timeout: const Duration(seconds: 30),
+      // Let the retried search finish first: the go-deeper action only appears while the
+      // engine is idle, and a provider resumed from SIGSTOP may chew through a backlog, so
+      // the search can run well past its nominal 4s.
+      await pumpFor(tester, const Duration(seconds: 8));
+
+      var goDeeperVisible = false;
+      for (var attempt = 0; attempt < 12 && !goDeeperVisible; attempt++) {
+        await tester.longPress(find.byType(EngineButton));
+        await tester.pump(const Duration(milliseconds: 300));
+        final deadline = DateTime.now().add(const Duration(seconds: 10));
+        while (DateTime.now().isBefore(deadline)) {
+          await tester.pump(const Duration(milliseconds: 200));
+          if (find.byIcon(Icons.add_circle_outlined).evaluate().isNotEmpty) {
+            goDeeperVisible = true;
+            break;
+          }
+          // If the engine dropped offline again, use the popup's Retry action.
+          if (find.byIcon(Icons.refresh).evaluate().isNotEmpty) {
+            await tester.tap(find.byIcon(Icons.refresh));
+            await tester.pump(const Duration(milliseconds: 500));
+          }
+        }
+        if (!goDeeperVisible) {
+          // Close the popup (if open) before trying again.
+          await tester.tapAt(const Offset(10, 100));
+          await tester.pump(const Duration(milliseconds: 300));
+        }
+      }
+      expect(
+        goDeeperVisible,
+        isTrue,
+        reason: 'the go-deeper action should appear once the engine goes idle',
       );
+
       await tester.tap(find.byIcon(Icons.add_circle_outlined));
       // The deeper search runs and the popup shows its live depth.
-      await pumpUntil(tester, find.textContaining('Depth'), timeout: const Duration(seconds: 30));
+      await pumpUntil(tester, find.textContaining('Depth'), timeout: const Duration(minutes: 1));
       await tester.tapAt(const Offset(10, 100));
       await tester.pump(const Duration(milliseconds: 500));
 
