@@ -1,5 +1,9 @@
 # External engine — testing status and next steps
 
+> **Current status and pickup plan: see `external-engine-e2e-handoff.md`** — the E2E
+> pipeline uncovered an app-side streaming bug (Android/cronet) that is the active
+> blocker; that document has the evidence and next steps.
+
 Status: the feature is merged (`219c7e1`) and its 23 unit tests pass. Real-network
 validation and the core on-device E2E flows are now automated in GitHub Actions (see
 below); what remains manual is a short list of device-specific checks in

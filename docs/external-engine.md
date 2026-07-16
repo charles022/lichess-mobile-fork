@@ -155,6 +155,12 @@ or run manually against your own provider with `tool/external_engine_spike.dart`
 
 ## End-to-end test checklist (on device)
 
+> **Status caveat (2026-07-16):** the E2E workflow is currently red — it uncovered a
+> real bug where the external analyse stream never delivers eval lines to the app on
+> Android (embedded cronet). Until that is fixed the "automated" marks below describe
+> the *implemented* test phases, not passing ones. See
+> `docs/external-engine-e2e-handoff.md` for the full diagnosis and pickup plan.
+
 The items marked **automated** run in CI on every relevant push via the
 **External engine E2E test (emulator)** workflow
 (`.github/workflows/external-engine-e2e-test.yml`), which boots the app on an Android
