@@ -168,14 +168,24 @@ manual pass on a phone.
       **automated** (provider is paused via SIGSTOP)
 - [x] Restart the provider, long-press engine button → Retry: external analysis resumes —
       **automated**
-- [ ] Rapid move scrubbing: no stale evals, provider log shows cancelled work
-- [ ] Delete the engine server-side: settings shows stale entry, analysis falls back to local
-- [ ] Log out / switch account: analysis falls back to local, no crash
-- [ ] Variant study not supported by the engine: local engine used silently
-- [ ] Background the app 5 minutes mid-analysis, resume: no stuck state
-- [ ] Airplane mode: offline fallback (local engine still works)
-- [ ] "Go deeper" / infinite search time
-- [ ] Threat mode (show threat): eval sign is correct
+- [x] Rapid move scrubbing: cancelled work handled cleanly, evals recover — **automated**
+      (provider-log inspection of the cancellations stays manual via the run artifact)
+- [x] Delete the engine server-side: analysis falls back to local — **automated**; the
+      "settings shows stale entry" half needs the 5-minute engine-list cache to expire, so
+      it stays manual
+- [ ] Log out / switch account: analysis falls back to local, no crash — **must stay
+      manual**: the app's sign-out revokes its token (`DELETE /api/token`), which in CI
+      would destroy the `LICHESS_API_TOKEN` secret itself
+- [x] Variant analysis not supported by the engine: local engine used silently —
+      **automated** (antichess against the chess-only CI engine)
+- [x] Background the app mid-analysis, resume: no stuck state — **automated with reduced
+      fidelity** (simulated lifecycle pause/resume for 15s; a real 5-minute OS
+      backgrounding with process freeze still needs a phone)
+- [x] Airplane mode: offline fallback (local engine still works) — **automated with reduced
+      fidelity** (emulator airplane mode via adb; real radio behavior needs a phone)
+- [x] "Go deeper" — **automated** (infinite search time stays manual)
+- [ ] Threat mode (show threat): eval sign is correct — manual by eye; the underlying
+      white-anchored score convention is asserted on every Tier 1 live protocol run
 
 ## Installing the fork on a device (Pixel 10 Pro)
 
