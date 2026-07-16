@@ -13,14 +13,44 @@ response bodies, so the analyse ND-JSON lines never reached Dart. The fix is
 pipeline: first eval line in 1.2–5.3s, ~19 evals over the 4s movetime, stream completes
 ~1s after movetime, `stop()` cancellation preserved.
 
-State of the E2E phases as of run #16 (`a78d378`, in progress at time of writing):
+State of the E2E phases as of run #17 (`5bdb0e1`, in progress at time of writing —
+started ~2026-07-16 22:45Z, expected to conclude within ~45 min of that):
 
-- **Proven passing**: settings selection, honest streaming assertion, offline
-  fallback + snackbar, retry, go-deeper (popup opens via the `openEnginePopup` fallback;
-  deeper request goes out with max search time), scrubbing cancel/restart requests.
+- **Proven passing** (run #15 attempt 2): settings selection, honest streaming assertion,
+  offline fallback + snackbar, retry, go-deeper (popup opens via the `openEnginePopup`
+  fallback; deeper request goes out with max search time), scrubbing cancel/restart
+  requests.
 - **Unproven yet** (rewritten in `a78d378`, awaiting a green run): post-scrub external
   label at ply 5, post-resume label at ply 4, unsupported variant, server-side deletion,
   airplane mode.
+
+Run log of this session, for context on flakiness:
+
+| Run | Commit | Outcome |
+|---|---|---|
+| #12 | `66ca4af` | streaming fixed; failed at go-deeper (state stuck `computing` — later understood) |
+| #13 | `7c888cc` | instrumented; same failure, diagnostics added |
+| #14 | `0a317ec` | wall-clock long-press still dead on static screens |
+| #15 a1 | `72a8d16` | runner crashed mid-emulator-step (logs 404) — re-ran |
+| #15 a2 | `72a8d16` | go-deeper PASSED via fallback; scrubbing failed on the eval-cache rule |
+| #16 | `a78d378` | hung to the 90-min job timeout (emulator/tool wedge, phase unknown — its jobs API 503'd; step log worth re-checking later) |
+| #17 | `5bdb0e1` | added 45-min step timeout; in progress |
+
+### Picking this up in a fresh session
+
+1. Check run #17 (workflow `external-engine-e2e-test.yml`, branch
+   `claude/android-external-engine-stream-tfyfag`) via the GitHub MCP actions tools.
+2. **Green** → update `docs/external-engine.md` (drop the red-workflow status caveat) and
+   `docs/external-engine-next-steps.md` (record the cronet→dart:io fix), commit, merge to
+   main.
+3. **Red with test output** → read the `[E2E:...]` timestamped diagnostics in the step
+   log (`get_job_logs`, `failed_only`, tail ~300); the failing phase is almost certainly
+   one of the five "unproven" ones above. Mind gotchas 2 and 3 below.
+4. **Step timed out at 45 min** → the #16 hang is reproducible; the preserved step-log
+   tail now shows which phase it died in. Suspect the late phases (variant switch /
+   server-side deletion / netdown) or an emulator freeze.
+5. GitHub API 503s and runner crashes both happened this session — re-run before
+   assuming a regression.
 
 Hard-won gotchas from this session (beyond the list at the bottom of this doc):
 
