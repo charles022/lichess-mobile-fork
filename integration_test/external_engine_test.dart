@@ -59,6 +59,7 @@ import 'package:lichess_mobile/src/utils/string.dart';
 import 'package:lichess_mobile/src/view/analysis/analysis_screen.dart';
 import 'package:lichess_mobile/src/view/engine/engine_button.dart';
 import 'package:lichess_mobile/src/view/settings/engine_settings_screen.dart';
+import 'package:lichess_mobile/src/widgets/buttons.dart';
 import 'package:logging/logging.dart';
 
 const kE2EToken = String.fromEnvironment('E2E_LICHESS_TOKEN');
@@ -195,7 +196,7 @@ void main() {
 
       await controlCommand('resume');
 
-      await longPressFor(tester, find.byType(EngineButton));
+      await openEnginePopup(tester);
       await pumpUntil(tester, find.byIcon(Icons.refresh), timeout: const Duration(seconds: 15));
       expect(
         find.textContaining('is offline'),
@@ -245,7 +246,7 @@ void main() {
 
       var goDeeperVisible = false;
       for (var attempt = 0; attempt < 12 && !goDeeperVisible; attempt++) {
-        await longPressFor(tester, find.byType(EngineButton));
+        await openEnginePopup(tester);
         dumpGoDeeperState(attempt, 'after long-press');
         final deadline = DateTime.now().add(const Duration(seconds: 10));
         while (DateTime.now().isBefore(deadline)) {
@@ -499,10 +500,39 @@ Future<void> longPressFor(WidgetTester tester, Finder finder) async {
   final gesture = await tester.startGesture(tester.getCenter(finder));
   // comfortably above kLongPressTimeout (500ms)
   final end = DateTime.now().add(const Duration(milliseconds: 700));
+  var jitter = 0.25;
   while (DateTime.now().isBefore(end)) {
+    // Micro-moves well within the touch slop (18px): on the live binding, the synthetic
+    // pointer stream is only reliably delivered while the pointer stays active and frames
+    // render — a stationary hold on a static screen never reaches the recognizer (observed
+    // in run 29511726394: identical holds worked while a spinner was animating and did
+    // nothing on an idle screen).
+    await gesture.moveBy(Offset(jitter, 0));
+    jitter = -jitter;
     await tester.pump(const Duration(milliseconds: 50));
   }
   await gesture.up();
+  await tester.pump(const Duration(milliseconds: 300));
+}
+
+/// Opens the engine popup (the popover shown by long-pressing [EngineButton]).
+///
+/// Tries the real long-press gesture first; if the popup (its `ListTile` body) is not up
+/// after two tries, invokes the button's `onLongPress` callback directly. The gesture
+/// mechanics themselves are covered by widget tests (`test/view/engine/engine_button_test.dart`);
+/// what this E2E test needs from the popup is its *content* against the real engine state.
+Future<void> openEnginePopup(WidgetTester tester) async {
+  for (var i = 0; i < 2; i++) {
+    await longPressFor(tester, find.byType(EngineButton));
+    if (find.byType(ListTile).evaluate().isNotEmpty) return;
+  }
+  debugPrint('[E2E] long-press gesture did not open the engine popup, invoking onLongPress');
+  tester
+      .widget<SemanticIconButton>(
+        find.descendant(of: find.byType(EngineButton), matching: find.byType(SemanticIconButton)),
+      )
+      .onLongPress
+      ?.call();
   await tester.pump(const Duration(milliseconds: 300));
 }
 
