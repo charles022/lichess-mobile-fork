@@ -26,7 +26,7 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - claude/mobile-engine-test-environments-yuabmi
+      - main
     paths:
       - 'tool/external_engine_spike.dart'
       - 'lib/src/model/auth/bearer.dart'
