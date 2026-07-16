@@ -190,8 +190,7 @@ void main() {
       );
 
       // Dismiss the popup.
-      await tester.tapAt(const Offset(10, 100));
-      await tester.pump(const Duration(milliseconds: 500));
+      await dismissPopover(tester);
 
       // ---- "Go deeper": a deeper external search can be requested from the popup ----
 
@@ -219,8 +218,7 @@ void main() {
         }
         if (!goDeeperVisible) {
           // Close the popup (if open) before trying again.
-          await tester.tapAt(const Offset(10, 100));
-          await tester.pump(const Duration(milliseconds: 300));
+          await dismissPopover(tester);
         }
       }
       expect(
@@ -232,8 +230,7 @@ void main() {
       await tester.tap(find.byIcon(Icons.add_circle_outlined));
       // The deeper search runs and the popup shows its live depth.
       await pumpUntil(tester, find.textContaining('Depth'), timeout: const Duration(minutes: 1));
-      await tester.tapAt(const Offset(10, 100));
-      await tester.pump(const Duration(milliseconds: 500));
+      await dismissPopover(tester);
 
       // ---- Rapid move scrubbing: cancelled work is handled cleanly, evals recover ----
 
@@ -454,6 +451,14 @@ Future<void> pumpUntil(
     }
     await tester.pump(const Duration(milliseconds: 100));
   }
+}
+
+/// Dismisses an open popover by tapping its barrier, at a spot that is harmless when no
+/// popover is open: the center of the app bar (an inert area — a blind corner tap could hit
+/// the back button and pop the whole screen instead).
+Future<void> dismissPopover(WidgetTester tester) async {
+  await tester.tapAt(tester.getCenter(find.byType(AppBar).first));
+  await tester.pump(const Duration(milliseconds: 500));
 }
 
 /// Pumps frames for the given [duration] of real time.
