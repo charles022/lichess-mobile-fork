@@ -52,9 +52,9 @@ Options:
   --user USER           System user to run the service as (default: engine).
   --service-name NAME   systemd unit name (default: lichess-engine-provider).
   --max-threads N       Max threads to register (default: all CPU cores).
-  --max-hash MB         Max hash to register in MB (default: half of RAM, capped at 8192,
-                        floored at 512). These become the ceilings of the engine's
-                        threads/memory sliders in the Lichess engine manager.
+  --max-hash MB         Max hash to register in MB (default: half of RAM, floored at 512).
+                        These become the ceilings of the engine's threads/memory sliders
+                        in the Lichess engine manager.
   --keep-alive          Pass --keep-alive to the provider (keep the engine process warm).
   --no-service          Skip the systemd install; do a foreground test run instead.
   -h, --help            Show this help.
@@ -152,8 +152,8 @@ $SUDO "$INSTALL_DIR/venv/bin/pip" install -r "$INSTALL_DIR/requirements.txt"
 # leave plenty of headroom. Explicit --max-threads/--max-hash (or $MAX_THREADS/$MAX_HASH)
 # always win.
 #
-# Threads default to every core; hash defaults to half of RAM, capped at 8 GB so we never
-# register an absurd value and floored at 512 MB so we never register less than before.
+# Threads default to every core; hash defaults to half of RAM, floored at 512 MB so we
+# never register less than the reference provider's own default.
 detect_cores() { nproc 2> /dev/null || getconf _NPROCESSORS_ONLN 2> /dev/null || echo 1; }
 detect_ram_mb() { awk '/^MemTotal:/ {print int($2 / 1024)}' /proc/meminfo 2> /dev/null || echo 0; }
 
@@ -164,7 +164,6 @@ if [ -z "$MAX_HASH" ]; then
   RAM_MB=$(detect_ram_mb)
   if [ "$RAM_MB" -gt 0 ]; then
     MAX_HASH=$((RAM_MB / 2))
-    [ "$MAX_HASH" -gt 8192 ] && MAX_HASH=8192
     [ "$MAX_HASH" -lt 512 ] && MAX_HASH=512
   else
     MAX_HASH=2048
