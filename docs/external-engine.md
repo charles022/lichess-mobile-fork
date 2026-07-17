@@ -40,6 +40,17 @@ coordinated with their team (see `external-engine-discussion-draft.md`).
 
 ## Provider setup (Ubuntu/Debian-family Linux)
 
+**Fast path:** `scripts/setup-external-engine.sh` automates all of the steps below (install
+prerequisites, check out the reference provider into a venv, and install + start the systemd
+service). On the engine machine:
+
+```bash
+sudo LICHESS_API_TOKEN=lip_*** ./scripts/setup-external-engine.sh
+```
+
+Run it with `--help` for options (engine name, binary path, threads/hash caps, `--no-service`
+for a foreground test run). The manual steps below explain exactly what it does.
+
 1. Install prerequisites:
 
    ```bash
