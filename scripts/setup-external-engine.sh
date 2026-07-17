@@ -51,8 +51,10 @@ Options:
   --install-dir DIR     Where to check out the provider (default: /opt/external-engine).
   --user USER           System user to run the service as (default: engine).
   --service-name NAME   systemd unit name (default: lichess-engine-provider).
-  --max-threads N       Pass --default-max-threads N to the provider.
-  --max-hash MB         Pass --default-max-hash MB to the provider.
+  --max-threads N       Max threads to register (default: all CPU cores).
+  --max-hash MB         Max hash to register in MB (default: half of RAM, capped at 8192,
+                        floored at 512). These become the ceilings of the engine's
+                        threads/memory sliders in the Lichess engine manager.
   --keep-alive          Pass --keep-alive to the provider (keep the engine process warm).
   --no-service          Skip the systemd install; do a foreground test run instead.
   -h, --help            Show this help.
@@ -143,10 +145,40 @@ $SUDO python3 -m venv "$INSTALL_DIR/venv"
 $SUDO "$INSTALL_DIR/venv/bin/pip" install --upgrade pip
 $SUDO "$INSTALL_DIR/venv/bin/pip" install -r "$INSTALL_DIR/requirements.txt"
 
+# Resource caps registered with the engine. These become the maxima the app/browser
+# request for external analysis (the broker clamps every request to them), and the ceilings
+# of the threads/memory sliders in the Lichess engine manager. The reference provider's own
+# defaults are modest (e.g. 512 MB hash), so we register generous, machine-aware values to
+# leave plenty of headroom. Explicit --max-threads/--max-hash (or $MAX_THREADS/$MAX_HASH)
+# always win.
+#
+# Threads default to every core; hash defaults to half of RAM, capped at 8 GB so we never
+# register an absurd value and floored at 512 MB so we never register less than before.
+detect_cores() { nproc 2> /dev/null || getconf _NPROCESSORS_ONLN 2> /dev/null || echo 1; }
+detect_ram_mb() { awk '/^MemTotal:/ {print int($2 / 1024)}' /proc/meminfo 2> /dev/null || echo 0; }
+
+if [ -z "$MAX_THREADS" ]; then
+  MAX_THREADS=$(detect_cores)
+fi
+if [ -z "$MAX_HASH" ]; then
+  RAM_MB=$(detect_ram_mb)
+  if [ "$RAM_MB" -gt 0 ]; then
+    MAX_HASH=$((RAM_MB / 2))
+    [ "$MAX_HASH" -gt 8192 ] && MAX_HASH=8192
+    [ "$MAX_HASH" -lt 512 ] && MAX_HASH=512
+  else
+    MAX_HASH=2048
+  fi
+fi
+log "Registering with maxThreads=$MAX_THREADS, maxHash=${MAX_HASH} MB (override with --max-threads/--max-hash)"
+
 # Assemble the provider arguments shared by the test run and the service.
-PROVIDER_ARGS=(--engine "$ENGINE_BIN" --name "$ENGINE_NAME")
-[ -n "$MAX_THREADS" ] && PROVIDER_ARGS+=(--default-max-threads "$MAX_THREADS")
-[ -n "$MAX_HASH" ] && PROVIDER_ARGS+=(--default-max-hash "$MAX_HASH")
+PROVIDER_ARGS=(
+  --engine "$ENGINE_BIN"
+  --name "$ENGINE_NAME"
+  --default-max-threads "$MAX_THREADS"
+  --default-max-hash "$MAX_HASH"
+)
 [ "$KEEP_ALIVE" -eq 1 ] && PROVIDER_ARGS+=(--keep-alive)
 
 # --- 3. Foreground test run (when --no-service) ------------------------------------------

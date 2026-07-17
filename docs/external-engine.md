@@ -49,7 +49,10 @@ sudo LICHESS_API_TOKEN=lip_*** ./scripts/setup-external-engine.sh
 ```
 
 Run it with `--help` for options (engine name, binary path, threads/hash caps, `--no-service`
-for a foreground test run). The manual steps below explain exactly what it does.
+for a foreground test run). By default it registers the engine with generous resource maxima —
+every CPU core and a hash of half the machine's RAM (capped at 8 GB) — so the threads/memory
+sliders in the Lichess engine manager have plenty of headroom; override with `--max-threads` /
+`--max-hash`. The manual steps below explain exactly what it does.
 
 1. Install prerequisites:
 
