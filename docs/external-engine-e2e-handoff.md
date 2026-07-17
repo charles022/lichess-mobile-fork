@@ -4,6 +4,37 @@ Written 2026-07-16 at the end of the session that built the emulator E2E pipelin
 (PR #7, PR #8, and the PR carrying this document). **Read this first when picking the
 work back up.**
 
+## RESOLVED (2026-07-17, hang-fix session — branch `claude/android-external-engine-hang-17g3z9`)
+
+**The workflow is green: run 29549888431 (#21, commit `ce3c1b8`) passed all ten phases.**
+This document is now history — the live status lives in `docs/external-engine.md` and the
+bug/fix record in `docs/external-engine-next-steps.md`. What this session found, for the
+record:
+
+- **The step-log premise of the pickup checklist below was wrong**: `flutter test`
+  buffers every device-side print until the test finishes, so the hung runs' step logs
+  were empty — no `[E2E:...]` line ever appears for a wedged test. The diagnosis came
+  from run #17 (29522926846, same test content on main), which failed fast instead of
+  hanging. `run_e2e_test.sh` now streams logcat's `flutter` tag live into the step
+  output, so this blind spot is gone.
+- **The hang (runs #16/#18) was a deterministic deadlock in the backgrounding phase**:
+  `AppLifecycleState.paused` disables frame scheduling and live-binding `pump` only
+  completes on a real frame, so `pumpFor` during the paused dwell never returned — and
+  the `resumed` call that would re-enable frames was never reached. The on-device
+  `testWidgets` timeout is not enforced, so the wedge ran into the step timeout.
+- **The scrubbing failure (runs #15/#17) was cloud-eval cache poisoning**: the test's
+  own mid-scrub `evalGet` fetched a `CloudEval` for the scrub-end position, and
+  `evaluate()` treats any-depth cloud evals as cache — silently cancelling the in-flight
+  external request (and its watchdog, which is why the logs went dead silent). Label
+  assertions now run at ply ≥ 16 (no cloud-eval requests at ply ≥ 15).
+- Whether a run hung or failed fast was just the cloud-eval race — one theory covered
+  all four runs.
+- Two more failures surfaced once the test got further: `AppLifecycleListener`'s debug
+  asserts on skipped lifecycle states (test now walks the legal chains), and a real app
+  bug — `HomeTabScreen._refreshData`'s unawaited `Future.wait` let the CI token's
+  expected `/api/mobile/home` 403 escape as an uncaught zone error (now caught in app
+  code).
+
 ## Progress update (2026-07-16, streaming-fix session — branch `claude/android-external-engine-stream-tfyfag`)
 
 **The streaming bug below is FIXED** (`66ca4af`): cronet (Android) buffers streamed

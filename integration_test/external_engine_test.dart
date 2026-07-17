@@ -69,10 +69,23 @@ const kE2EControlUrl = String.fromEnvironment(
   defaultValue: 'http://10.0.2.2:8899',
 );
 
-/// An offbeat opening line, so the resulting position has no deep cloud eval and the engine
-/// actually has to compute (the app prefers a deeper cloud eval over engine work when one
+/// An offbeat line of rook shuffling, so the positions under test have no cloud eval and the
+/// engine actually has to compute (the app prefers a cloud eval over engine work when one
 /// exists — see `EvaluationMixin`).
-const kObscurePgn = '1. h4 a5 2. Rh3 Ra6 3. Rg3 Rh6';
+///
+/// The line is 20 plies long on purpose: every phase asserting the external engine's label
+/// runs at ply >= 16, and the app never requests a cloud eval at ply >= 15 (`_canCloudEval`).
+/// This matters because `EvaluationService.evaluate` treats a `CloudEval` of ANY depth as
+/// cache — it then starts no engine work at all, silently cancelling any in-flight external
+/// request, so the external label can never appear. At low plies the test poisons itself: its
+/// own mid-scrub `evalGet` fetched a cloud eval for the scrub-end position and the final
+/// (debounced) eval request was served from it (run 29522926846, ply 5).
+const kObscurePgn =
+    '1. h4 a5 2. Rh3 Ra6 3. Rg3 Rh6 4. Ra3 Rg6 5. Rb3 Rf6 6. Rc3 Re6 '
+    '7. Rd3 Rd6 8. Re3 Rc6 9. Rf3 Rb6 10. Rg3 Ra6';
+
+/// The move cursor for [kObscurePgn] analysis screens: the end of the line, ply 20.
+const kInitialMoveCursor = 20;
 
 /// The engine label under the eval chip truncates names longer than 8 characters
 /// (see `EngineButton`); match on the visible prefix.
@@ -149,7 +162,7 @@ void main() {
             pgn: kObscurePgn,
             variant: Variant.standard,
             isComputerAnalysisAllowed: true,
-            initialMoveCursor: 6,
+            initialMoveCursor: kInitialMoveCursor,
           ),
         ),
       );
@@ -284,13 +297,13 @@ void main() {
         await tester.tap(find.byKey(const ValueKey('goto-previous')));
         await tester.pump(const Duration(milliseconds: 150));
       }
-      // Scrub forward to ply 5, NOT back to the initial ply 6: ply 6 already has a
+      // Scrub forward to ply 19, NOT back to the initial ply 20: ply 20 already has a
       // full-length eval cached from the earlier phases, and the app (by design) serves such
       // positions from cache without starting any engine work — no external work means the
-      // label under the chip stays on the local engine and the assertion below could never
-      // match (run 29514550666). Ply 5 has never been fully evaluated, so the external engine
-      // must actually run. (Transient mid-scrub requests can't poison this: a cached eval
-      // only wins with searchTime >= the requested 4s.)
+      // label under the chip never shows the external engine and the assertion below could
+      // never match (run 29514550666). Ply 19 has never been fully evaluated, and being
+      // >= 15 it can't acquire a cloud eval either (see [kObscurePgn]), so the external
+      // engine must actually run.
       for (var i = 0; i < 3; i++) {
         await tester.tap(find.byKey(const ValueKey('goto-next')));
         await tester.pump(const Duration(milliseconds: 150));
@@ -307,19 +320,36 @@ void main() {
 
       // ---- Backgrounding (simulated lifecycle): no stuck state after resume ----
 
+      // Walk the full legal lifecycle sequence in each direction: jumping straight to
+      // `paused` (or back to `resumed`) trips `AppLifecycleListener`'s debug transition
+      // asserts, which the test framework collects as test-failing exceptions (run
+      // 29548337035 recorded four of them).
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
-      await pumpFor(tester, const Duration(seconds: 15));
+      // Do NOT pump while paused: the paused lifecycle state disables frame scheduling
+      // (SchedulerBinding._setFramesEnabledState(false)), and on the live binding `pump` only
+      // completes when a real frame fires — so a pump here deadlocks the whole test, before
+      // the `resumed` line below can ever re-enable frames. This is what wedged runs #16 and
+      // #18 past their 45-minute step timeout (the on-device test timeout is not enforced,
+      // and `flutter test` buffers all prints until the test ends, so the step log showed
+      // nothing at all). Dart timers and network streams keep running without frames, which
+      // is all the background dwell needs.
+      await Future<void>.delayed(const Duration(seconds: 15));
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
       await tester.pump(const Duration(seconds: 1));
 
       // The app is still responsive after resume: toggling the engine off and on works (the
-      // current ply-5 eval is now cached, so this alone starts no external work — see the
+      // current ply-19 eval is now cached, so this alone starts no external work — see the
       // scrubbing phase note)...
       await tester.tap(find.byType(EngineButton));
       await tester.pump(const Duration(milliseconds: 500));
       await tester.tap(find.byType(EngineButton));
       await tester.pump(const Duration(milliseconds: 500));
-      // ...and a fresh evaluation (ply 4 has no cached eval) reaches the external engine.
+      // ...and a fresh evaluation (ply 18 has no cached eval and no cloud eval) reaches the
+      // external engine.
       await tester.tap(find.byKey(const ValueKey('goto-previous')));
       await pumpUntil(
         tester,
@@ -368,7 +398,7 @@ void main() {
             pgn: kObscurePgn,
             variant: Variant.standard,
             isComputerAnalysisAllowed: true,
-            initialMoveCursor: 6,
+            initialMoveCursor: kInitialMoveCursor,
           ),
         ),
       );

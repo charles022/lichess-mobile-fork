@@ -1,13 +1,50 @@
 # External engine — testing status and next steps
 
-> **Current status and pickup plan: see `external-engine-e2e-handoff.md`** — the E2E
-> pipeline uncovered an app-side streaming bug (Android/cronet) that is the active
-> blocker; that document has the evidence and next steps.
+> **Current status (2026-07-17): the E2E workflow is green** (run 29549888431, all ten
+> phases). The full diagnosis history lives in `external-engine-e2e-handoff.md`; the
+> bugs the pipeline caught and their fixes are recorded below.
 
 Status: the feature is merged (`219c7e1`) and its 23 unit tests pass. Real-network
 validation and the core on-device E2E flows are now automated in GitHub Actions (see
 below); what remains manual is a short list of device-specific checks in
 `docs/external-engine.md`.
+
+## Bugs the E2E pipeline caught (and their fixes)
+
+The pipeline paid for itself: it caught two real app bugs and two test-harness design
+traps before the feature ever ran on a phone.
+
+1. **Android streaming bug (the big one)**: with the platform-default cronet client, the
+   analyse ND-JSON stream never delivered a single eval line to Dart — cronet buffers
+   small streamed chunks, so every request died on the 8s first-line watchdog and fell
+   back to the local engine. Fix: `HttpClientFactory.createStreamingClient()`, a
+   `dart:io` `IOClient` used by `ExternalEngineClient` for the analyse request on all
+   platforms (`66ca4af`). Verified on the pipeline: first eval line in 1.2–5.3s, ~20
+   evals over the 4s movetime, and closing the client still cancels the analysis at the
+   broker (dart:io force-closes the connection). The sideload APK is built with
+   `cronetHttpNoPlay=true`, so a real phone would have hit the same bug.
+2. **Unhandled refresh errors on the home tab**: `HomeTabScreen._refreshData` (fired
+   unawaited on focus-regained and connectivity-restored) had no error handling on its
+   `Future.wait` of `ref.refresh(...)` futures, so any failing refresh — a network blip,
+   or the CI token's expected `/api/mobile/home` 403 — escaped as an uncaught zone
+   error. Fixed by catching the error; each provider already surfaces its failure
+   through its own `AsyncValue` (`ce3c1b8`).
+3. **Test-harness trap — lifecycle pump deadlock**: `AppLifecycleState.paused` disables
+   frame scheduling, and on the live binding `pump` only completes on a real frame, so
+   pumping while paused deadlocks the test (and the on-device `testWidgets` timeout is
+   NOT enforced, so this burned 45-minute step timeouts). The backgrounding dwell uses
+   `Future.delayed`, and the lifecycle walks the legal
+   `resumed→inactive→hidden→paused` chain and back (`092d810`, `ce3c1b8`).
+4. **Test-harness trap — cloud-eval cache poisoning**: `EvaluationService.evaluate`
+   treats a `CloudEval` of any depth as cache (no engine work, in-flight external
+   request silently cancelled), and the test's own mid-scrub `evalGet` could fetch one
+   for the scrub-end position. All label assertions now run at ply ≥ 16, where the app
+   never requests cloud evals (`_canCloudEval` cuts off at ply 15) (`092d810`).
+
+Diagnosability lesson baked into the runner script: `flutter test` buffers all
+device-side prints until a test finishes, so a wedged test produces an empty step log.
+`run_e2e_test.sh` now streams logcat's `flutter` tag live into the step output and
+bounds `flutter test` with a host-side 35-minute `timeout` so diagnostics always run.
 
 ## Test environment decision
 
