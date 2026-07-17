@@ -84,6 +84,9 @@ done
 log() { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 err() { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; }
 
+# Where to create (or replace) the OAuth token the provider needs.
+TOKEN_URL="https://lichess.org/account/oauth/token/create?scopes[]=engine:read&scopes[]=engine:write&description=External+engine+provider"
+
 # sudo only when we are not already root.
 SUDO=""
 if [ "$(id -u)" -ne 0 ]; then
@@ -98,9 +101,13 @@ fi
 if [ -z "$TOKEN" ]; then
   err "no Lichess token. Pass --token or set LICHESS_API_TOKEN."
   echo "Create one (scopes engine:read + engine:write) at:" >&2
-  echo "  https://lichess.org/account/oauth/token/create?scopes[]=engine:read&scopes[]=engine:write&description=External+engine+provider" >&2
+  echo "  $TOKEN_URL" >&2
   exit 1
 fi
+
+log "Using the supplied Lichess token"
+echo "  To create or replace it (scopes engine:read + engine:write), visit:"
+echo "  $TOKEN_URL"
 
 # --- 1. Prerequisites ---------------------------------------------------------------------
 
@@ -200,3 +207,7 @@ echo "  Logs:    ${SUDO:+$SUDO }journalctl -u $SERVICE_NAME -f"
 echo
 echo "In the app: sign in with the same account, then Settings -> Chess engine ->"
 echo "External engines, and select \"$ENGINE_NAME\"."
+echo
+echo "To rotate the token later, create a new one at:"
+echo "  $TOKEN_URL"
+echo "then update $ENV_FILE and run: ${SUDO:+$SUDO }systemctl restart $SERVICE_NAME"
