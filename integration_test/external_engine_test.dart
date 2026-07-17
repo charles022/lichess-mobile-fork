@@ -320,6 +320,12 @@ void main() {
 
       // ---- Backgrounding (simulated lifecycle): no stuck state after resume ----
 
+      // Walk the full legal lifecycle sequence in each direction: jumping straight to
+      // `paused` (or back to `resumed`) trips `AppLifecycleListener`'s debug transition
+      // asserts, which the test framework collects as test-failing exceptions (run
+      // 29548337035 recorded four of them).
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
       // Do NOT pump while paused: the paused lifecycle state disables frame scheduling
       // (SchedulerBinding._setFramesEnabledState(false)), and on the live binding `pump` only
@@ -330,6 +336,8 @@ void main() {
       // nothing at all). Dart timers and network streams keep running without frames, which
       // is all the background dwell needs.
       await Future<void>.delayed(const Duration(seconds: 15));
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
       await tester.pump(const Duration(seconds: 1));
 

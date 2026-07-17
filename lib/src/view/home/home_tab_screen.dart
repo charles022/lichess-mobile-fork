@@ -452,16 +452,23 @@ class _HomeScreenState extends ConsumerState<HomeTabScreen> {
     );
   }
 
-  Future<void> _refreshData({required bool isOnline}) {
-    return Future.wait([
-      ref.refresh(myRecentGamesProvider.future),
-      if (isOnline) ref.refresh(challengesProvider.future),
-      if (isOnline) ref.refresh(unreadMessagesProvider.future),
-      if (isOnline) ref.refresh(accountProvider.future),
-      if (isOnline) ref.refresh(ongoingGamesProvider.future),
-      if (isOnline) ref.refresh(featuredTournamentsProvider.future),
-      if (isOnline) ref.refresh(followingCarouselProvider.future),
-    ]);
+  Future<void> _refreshData({required bool isOnline}) async {
+    try {
+      await Future.wait([
+        ref.refresh(myRecentGamesProvider.future),
+        if (isOnline) ref.refresh(challengesProvider.future),
+        if (isOnline) ref.refresh(unreadMessagesProvider.future),
+        if (isOnline) ref.refresh(accountProvider.future),
+        if (isOnline) ref.refresh(ongoingGamesProvider.future),
+        if (isOnline) ref.refresh(featuredTournamentsProvider.future),
+        if (isOnline) ref.refresh(followingCarouselProvider.future),
+      ]);
+    } catch (_) {
+      // A failed refresh (network blip, missing API scope) is already reflected in the
+      // failing provider's own AsyncValue; this future is also fired unawaited (focus
+      // regained, connectivity restored), so an error here must not escape as an
+      // uncaught async error.
+    }
   }
 }
 
