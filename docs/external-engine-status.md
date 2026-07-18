@@ -12,6 +12,8 @@ Updated 2026-07-17.
   mobile, `lila`, and `lila-ws` authentication paths.
 - Configured the production mobile signing value from Lichess's public F-Droid build,
   rebuilt the APK, installed it, and signed in successfully.
+- Added `engine:read` to the OAuth request, rebuilt from commit `597a74f89`, and
+  installed and authorized that build on the phone.
 
 ## What we found
 
@@ -28,10 +30,11 @@ Updated 2026-07-17.
   the established ping/pong state using the same signed bearer authentication path.
 - The physical-device request to `GET /api/external-engine` returns 403 with only
   `web:mobile`, confirming that the app must request `engine:read` explicitly.
+- With `engine:read`, the same endpoint returns 200 and the app lists both registered
+  providers: Alpha 2 and Stockfish (home server).
 
 ## What we are doing next
 
-1. Build and install the app with `engine:read` added to its OAuth request.
-2. Sign in again and confirm that Settings → Chess engine → External engines lists the
-   account's registered provider.
-3. Run the remaining physical-device external-engine checks.
+1. Select a registered provider and run analysis on the phone.
+2. Verify fallback and recovery by stopping and restarting the provider during analysis.
+3. Finish the remaining manual physical-device checks in `external-engine.md`.
