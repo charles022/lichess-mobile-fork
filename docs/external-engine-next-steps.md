@@ -115,13 +115,9 @@ verifies that the spike CLI compiles, and skips the live steps with a notice.
 
 ## Hurdles — updated
 
-1. **OAuth scope mismatch (open, highest priority).** The app requests only
-   `web:mobile` but `GET /api/external-engine` is documented to need `engine:read`.
-   The live workflow's `--signed` step provides evidence about the bearer form; the
-   scope question itself is only fully answered with a real app session token, i.e. on
-   device (or by reading the lila source). If the scope must change,
-   `lib/src/model/auth/auth_repository.dart` needs `engine:read` added and users must
-   re-login.
+1. **OAuth scope mismatch (fixed).** A real `web:mobile` app session returned 403 from
+   `GET /api/external-engine` on a Pixel 10 Pro. The app now requests `engine:read`
+   explicitly; users upgrading from the earlier fork build must sign in again.
 
 2. **Analyse request/response contract (automated — and it found a real bug).** The
    first live run (2026-07-15) proved the broker streams `cp`/`mate` scores from

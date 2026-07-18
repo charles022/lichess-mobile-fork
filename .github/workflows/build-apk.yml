@@ -17,6 +17,10 @@ name: Build sideload APK
 #
 # Note: the release application id is org.lichess.mobileV2, the same as the
 # official app — uninstall the Play Store app before installing this APK.
+#
+# Authenticated production builds require the official Lichess Mobile HMAC
+# value published by the reproducible F-Droid build. Store it as the WS_SECRET
+# repository secret. A personal access token is not a substitute.
 
 on:
   workflow_dispatch:
@@ -48,6 +52,15 @@ jobs:
 
       - name: Code generation
         run: dart run build_runner build
+
+      - name: Verify production authentication secret
+        run: |
+          if [ -z "$WS_SECRET" ] || [ "$WS_SECRET" = "somethingElseInProd" ]; then
+            echo "::error::WS_SECRET must contain the production Lichess Mobile HMAC secret."
+            exit 1
+          fi
+        env:
+          WS_SECRET: ${{ secrets.WS_SECRET }}
 
       - name: Configure Keystore
         run: |
@@ -83,7 +96,9 @@ jobs:
           --dart-define=cronetHttpNoPlay=true
           --dart-define=LICHESS_HOST=lichess.org
           --dart-define=LICHESS_WS_HOST=socket.lichess.org
-          ${{ secrets.WS_SECRET != '' && format('--dart-define=LICHESS_WS_SECRET={0}', secrets.WS_SECRET) || '' }}
+          --dart-define=LICHESS_WS_SECRET="$WS_SECRET"
+        env:
+          WS_SECRET: ${{ secrets.WS_SECRET }}
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4

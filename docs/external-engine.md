@@ -217,26 +217,29 @@ The final deliverable of this feature is a sideloadable build of the fork:
    flutter build apk --release --target-platform android-arm64 \
        --dart-define=cronetHttpNoPlay=true \
        --dart-define=LICHESS_HOST=lichess.org \
-       --dart-define=LICHESS_WS_HOST=socket.lichess.org
+       --dart-define=LICHESS_WS_HOST=socket.lichess.org \
+       --dart-define=LICHESS_WS_SECRET="$LICHESS_WS_SECRET"
    ```
 
    (Local release builds need an `android/key.properties` signing config; see the workflow file
-   for how to generate a keystore.)
+   for how to generate a keystore.) `LICHESS_WS_SECRET` must be the official production Lichess
+   Mobile HMAC value; a personal access token cannot replace it. Lichess publishes this client
+   build constant in its
+   [F-Droid workflow](https://github.com/lichess-org/mobile/blob/fdroid/.github/workflows/upload_fdroid_apks.yml)
+   for reproducible builds. The workflow stores it as the `WS_SECRET` repository secret and
+   stops before building if it is absent.
 
 2. The release application id is `org.lichess.mobileV2` — the same as the official app.
    **Uninstall the Play Store app first**, then install the APK (enable "install unknown apps"
    for your browser/file manager on the Pixel).
 
-3. Sign in, then follow "Using it in the app" above. Note the fork is built without the
-   official `LICHESS_WS_SECRET`; if authenticated API calls misbehave, that is the first thing
-   to investigate (see open questions).
+3. Sign in, then follow "Using it in the app" above.
 
 ## Known limitations / open questions
 
-- Whether the app's OAuth session (scope `web:mobile`) can call `GET /api/external-engine` on
-  lichess.org is unverified — the fork may need to add `engine:read` to its requested scopes
-  (`lib/src/model/auth/auth_repository.dart`), which requires re-login. Tracked in the
-  maintainer discussion draft.
+- The app requests `engine:read` in addition to `web:mobile`. A Pixel 10 Pro test confirmed
+  that `GET /api/external-engine` returns 403 when the session has only `web:mobile`; users
+  upgrading from that build must sign in again to grant the added scope.
 - The cores/hash sliders in engine settings apply to the local engine (including fallback);
   external analysis always requests the engine's registered `maxThreads`/`maxHash`.
 - The engine list is cached for 5 minutes; a newly registered engine may take up to that long

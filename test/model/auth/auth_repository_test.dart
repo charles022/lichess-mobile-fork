@@ -83,6 +83,21 @@ void main() {
       expect(redirectUrl, startsWith('org.lichess.mobile://'));
     });
 
+    test('requests mobile and external-engine scopes', () async {
+      List<String>? scopes;
+      final container = await appAuthContainer(
+        accountClient(),
+        FakeFlutterAppAuth((request) async {
+          scopes = request.scopes;
+          return tokenResponse();
+        }),
+      );
+      await container.read(authRepositoryProvider).signIn();
+
+      expect(scopes, oauthScopes);
+      expect(scopes, containsAll(['web:mobile', 'engine:read']));
+    });
+
     test('throws SignInCancelledException when the user cancels the auth session', () async {
       final container = await appAuthContainer(
         accountClient(),
