@@ -171,7 +171,7 @@ or run manually against your own provider with `tool/external_engine_spike.dart`
 > fixing a real Android streaming bug (cronet buffered the analyse ND-JSON stream; the
 > app now uses a `dart:io` client for that request) and an unhandled-refresh-error app
 > bug — see `docs/external-engine-next-steps.md` for the record and
-> `docs/external-engine-e2e-handoff.md` for the diagnosis history.
+> `docs/external-engine-status.md` for the current status.
 
 The items marked **automated** run in CI on every relevant push via the
 **External engine E2E test (emulator)** workflow

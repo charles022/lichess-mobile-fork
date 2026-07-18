@@ -88,7 +88,7 @@ class HttpClientFactory {
   /// small chunks promptly: with cronet (Android), the few-hundred-byte ND-JSON lines of the
   /// external engine analyse stream never reach the Dart stream at all — every request dies on
   /// the first-line watchdog while the provider is demonstrably streaming (verified on the E2E
-  /// emulator pipeline; see docs/external-engine-e2e-handoff.md). `dart:io` delivers each chunk
+  /// emulator pipeline; see docs/external-engine-status.md). `dart:io` delivers each chunk
   /// as it arrives on the socket, and the Tier 1 spike proves it streams the broker endpoint
   /// fine. Used on all platforms for consistency (NSURLSession is suspected of the same class
   /// of buffering).

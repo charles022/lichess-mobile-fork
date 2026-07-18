@@ -1,7 +1,7 @@
 # External engine — testing status and next steps
 
 > **Current status (2026-07-17): the E2E workflow is green** (run 29549888431, all ten
-> phases). The full diagnosis history lives in `external-engine-e2e-handoff.md`; the
+> phases). The current hardware-test status lives in `external-engine-status.md`; the
 > bugs the pipeline caught and their fixes are recorded below.
 
 Status: the feature is merged (`219c7e1`) and its 23 unit tests pass. Real-network
