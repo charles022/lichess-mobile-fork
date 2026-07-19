@@ -50,8 +50,8 @@ Options:
   --install-dir DIR     Where to check out the provider (default: /opt/external-engine).
   --user USER           System user to run the service as (default: engine).
   --service-name NAME   systemd unit name (default: lichess-engine-provider).
-  --max-threads N       Pass --default-max-threads N to the provider.
-  --max-hash MB         Pass --default-max-hash MB to the provider.
+  --max-threads N       Pass --max-threads N to the provider.
+  --max-hash MB         Pass --max-hash MB to the provider.
   --keep-alive          Pass --keep-alive to the provider (keep the engine process warm).
   --no-service          Skip the systemd install; do a foreground test run instead.
   -h, --help            Show this help.
@@ -285,8 +285,8 @@ fi
 
 # Assemble the provider arguments shared by the test run and the service.
 PROVIDER_ARGS=(--engine "$ENGINE_BIN" --name "$ENGINE_NAME")
-[ -n "$MAX_THREADS" ] && PROVIDER_ARGS+=(--default-max-threads "$MAX_THREADS")
-[ -n "$MAX_HASH" ] && PROVIDER_ARGS+=(--default-max-hash "$MAX_HASH")
+[ -n "$MAX_THREADS" ] && PROVIDER_ARGS+=(--max-threads "$MAX_THREADS")
+[ -n "$MAX_HASH" ] && PROVIDER_ARGS+=(--max-hash "$MAX_HASH")
 [ "$KEEP_ALIVE" -eq 1 ] && PROVIDER_ARGS+=(--keep-alive)
 
 # --- 3. Foreground test run (when --no-service) ------------------------------------------
