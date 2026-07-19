@@ -1,19 +1,16 @@
 #!/usr/bin/env bash
 # Set up the Lichess external engine provider on your own server.
 #
-# This automates the provider runbook in docs/external-engine.md (steps 1-5): it installs
-# the prerequisites, checks out the reference provider from lichess-org/external-engine into
-# a Python venv, and — unless --no-service is given — installs and starts a systemd service
-# so the provider registers your engine and long-polls the broker across reboots.
+# Standalone script (no repo checkout needed): it installs the prerequisites, checks out
+# the reference provider from https://github.com/lichess-org/external-engine into a Python
+# venv, and — unless --no-service is given — installs and starts a systemd service so the
+# provider registers your engine and long-polls the broker across reboots.
 #
-# The commands mirror the ones kept green in CI by the External engine live/E2E workflows
-# (.github/workflows/external-engine-*.yml), so a passing CI run is also a test of this path.
-#
-# Target: Ubuntu/Debian-family Linux with systemd. Run as root (or via sudo) for the default
-# service install; --no-service only needs sudo for the apt step.
+# Target: Ubuntu/Debian- or Fedora-family Linux with systemd. Run as root (or via sudo) for
+# the default service install; --no-service only needs sudo for the package install step.
 #
 # Quick start:
-#   sudo LICHESS_API_TOKEN=lip_xxx ./scripts/setup-external-engine.sh
+#   sudo LICHESS_API_TOKEN=lip_xxx ./setup-external-engine.sh
 #
 # Create the token (scopes engine:read + engine:write) at:
 #   https://lichess.org/account/oauth/token/create?scopes[]=engine:read&scopes[]=engine:write&description=External+engine+provider
@@ -111,12 +108,14 @@ echo "  $TOKEN_URL"
 
 # --- 1. Prerequisites ---------------------------------------------------------------------
 
-log "Installing prerequisites (python3, python3-venv, git, stockfish)"
+log "Installing prerequisites (python3, venv, git, stockfish)"
 if command -v apt-get > /dev/null; then
   $SUDO apt-get update
   $SUDO apt-get install -y python3 python3-venv git stockfish
+elif command -v dnf > /dev/null; then
+  $SUDO dnf install -y python3 git stockfish
 else
-  echo "  (non-apt system: ensure python3, python3-venv, git and a UCI engine are installed)"
+  echo "  (unknown package manager: ensure python3 (with venv), git and a UCI engine are installed)"
 fi
 
 # Ubuntu/Debian install stockfish to /usr/games, which is often off non-interactive PATH.
