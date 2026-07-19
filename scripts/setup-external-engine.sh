@@ -275,6 +275,14 @@ $SUDO python3 -m venv "$INSTALL_DIR/venv"
 $SUDO "$INSTALL_DIR/venv/bin/pip" install --upgrade pip
 $SUDO "$INSTALL_DIR/venv/bin/pip" install -r "$INSTALL_DIR/requirements.txt"
 
+if [ -z "$MAX_HASH" ] && [ -f /proc/meminfo ]; then
+  TOTAL_MEM_KB=$(awk '/MemTotal/ {print $2}' /proc/meminfo)
+  if [ -n "$TOTAL_MEM_KB" ] && [ "$TOTAL_MEM_KB" -gt 0 ]; then
+    MAX_HASH=$((TOTAL_MEM_KB / 1024 * 3 / 4))
+    log "Auto-configured max hash to ${MAX_HASH}MB (75% of total RAM)"
+  fi
+fi
+
 # Assemble the provider arguments shared by the test run and the service.
 PROVIDER_ARGS=(--engine "$ENGINE_BIN" --name "$ENGINE_NAME")
 [ -n "$MAX_THREADS" ] && PROVIDER_ARGS+=(--default-max-threads "$MAX_THREADS")
