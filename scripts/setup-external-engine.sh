@@ -139,6 +139,7 @@ create_engine() {
         echo "Name cannot be empty."
         return
     fi
+    read -p "Enter UCI engine binary path (leave blank to auto-detect Stockfish): " engine_bin || return
     echo ""
     echo "To create a Lichess API key, visit:"
     echo "$TOKEN_URL"
@@ -156,7 +157,9 @@ create_engine() {
     local svc_name="lichess-engine-provider-$safe_name"
     
     echo "Creating engine..."
-    sudo LICHESS_API_TOKEN="$api_key" "$0" --name "$engine_name" --service-name "$svc_name"
+    local setup_args=(--name "$engine_name" --service-name "$svc_name")
+    [ -n "$engine_bin" ] && setup_args+=(--engine "$engine_bin")
+    sudo LICHESS_API_TOKEN="$api_key" "$0" "${setup_args[@]}"
 }
 
 remove_engine() {
