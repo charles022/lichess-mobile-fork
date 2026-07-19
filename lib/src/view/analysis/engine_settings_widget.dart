@@ -60,12 +60,12 @@ class EngineSettingsWidget extends ConsumerWidget {
                 labelBuilder: (value) => value.toInt().toString(),
                 onChangeEnd: (value) => onSetNumEvalLines!.call(value.toInt()),
               ),
-            if (maxEngineCores > 1)
+            if (maxEngineThreads > 1)
               SliderSettingsTile(
                 title: Text(context.l10n.cpus),
                 value: prefs.numEngineCores.toDouble(),
                 values: List.generate(
-                  maxEngineCores,
+                  maxEngineThreads,
                   (index) => index + 1,
                 ).map((e) => e.toDouble()).toList(),
                 labelBuilder: (value) => value.toInt().toString(),

@@ -9,6 +9,9 @@ import 'package:multistockfish/multistockfish.dart';
 /// Maximum number of CPU cores available for engine use.
 final maxEngineCores = max(Platform.numberOfProcessors - 1, 1);
 
+/// Maximum number of engine threads exposed in settings.
+const maxEngineThreads = 32;
+
 const _nnueDownloadUrl = '$kLichessCDNHost/assets/lifat/nnue/';
 
 /// URL to download the latest big NNUE network.

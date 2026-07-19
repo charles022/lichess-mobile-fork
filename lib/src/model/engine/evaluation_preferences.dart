@@ -49,7 +49,7 @@ class EngineEvaluationPreferences extends Notifier<EngineEvaluationPrefState>
   }
 
   Future<void> setEngineCores(int numEngineCores) {
-    assert(numEngineCores >= 1 && numEngineCores <= maxEngineCores);
+    assert(numEngineCores >= 1 && numEngineCores <= maxEngineThreads);
     return save(state.copyWith(numEngineCores: numEngineCores));
   }
 
@@ -104,7 +104,8 @@ sealed class EngineEvaluationPrefState with _$EngineEvaluationPrefState implemen
     /// Whether the engine evaluation is enabled (acts both for local and cloud).
     required bool isEnabled,
     @Assert('numEvalLines >= 0 && numEvalLines <= 3') required int numEvalLines,
-    @Assert('numEngineCores >= 1 && numEngineCores <= maxEngineCores') required int numEngineCores,
+    @Assert('numEngineCores >= 1 && numEngineCores <= maxEngineThreads')
+    required int numEngineCores,
     @JsonKey(
       defaultValue: _searchTimeDefault,
       fromJson: _searchTimeFromJson,
