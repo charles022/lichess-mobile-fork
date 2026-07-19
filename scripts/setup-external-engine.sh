@@ -32,6 +32,7 @@ MAX_THREADS="${MAX_THREADS:-}"
 MAX_HASH="${MAX_HASH:-}"
 KEEP_ALIVE=0
 INSTALL_SERVICE=1
+RUN_MANAGER=0
 
 usage() {
   cat <<'EOF'
@@ -40,6 +41,7 @@ Usage: setup-external-engine.sh [options]
 Sets up the Lichess external engine provider (see docs/external-engine.md).
 
 Options:
+  --manage              Open the interactive external engine manager.
   --token TOKEN         Lichess OAuth token (engine:read + engine:write).
                         Defaults to $LICHESS_API_TOKEN.
   --name NAME           Engine name shown in the app (default: "Stockfish (home server)").
@@ -56,13 +58,20 @@ Options:
 
 Environment variables mirror the long options (LICHESS_API_TOKEN, ENGINE_NAME, ENGINE_BIN,
 INSTALL_DIR, SERVICE_USER, SERVICE_NAME, MAX_THREADS, MAX_HASH).
+
+If run without any arguments or environment variables, it opens the interactive manager.
 EOF
 }
 
 # --- Parse arguments ----------------------------------------------------------------------
 
+if [ $# -eq 0 ] && [ -z "$TOKEN" ]; then
+  RUN_MANAGER=1
+fi
+
 while [ $# -gt 0 ]; do
   case "$1" in
+    --manage) RUN_MANAGER=1; shift ;;
     --token) TOKEN="$2"; shift 2 ;;
     --name) ENGINE_NAME="$2"; shift 2 ;;
     --engine) ENGINE_BIN="$2"; shift 2 ;;
@@ -83,6 +92,130 @@ err() { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; }
 
 # Where to create (or replace) the OAuth token the provider needs.
 TOKEN_URL="https://lichess.org/account/oauth/token/create?scopes[]=engine:read&scopes[]=engine:write&description=External+engine+provider"
+
+# --- Interactive Manager ------------------------------------------------------------------
+
+get_services() {
+    # Find all systemd services that look like our engine providers
+    grep -l "Lichess external engine provider" /etc/systemd/system/*.service 2>/dev/null || true
+}
+
+get_engine_name() {
+    local svc_file="$1"
+    python3 -c "
+import sys, shlex
+try:
+    with open(sys.argv[1], 'r') as f:
+        for line in f:
+            if line.startswith('ExecStart='):
+                parts = shlex.split(line[10:])
+                if '--name' in parts:
+                    print(parts[parts.index('--name')+1])
+                    sys.exit(0)
+except Exception:
+    pass
+print('Unknown')
+" "$svc_file"
+}
+
+list_engines() {
+    local services=($(get_services))
+    if [ ${#services[@]} -eq 0 ]; then
+        echo "No engines found."
+        return 1
+    fi
+    for i in "${!services[@]}"; do
+        local svc_file="${services[$i]}"
+        local name=$(get_engine_name "$svc_file")
+        local svc_name=$(basename "$svc_file" .service)
+        echo "$((i+1)). $name ($svc_name)"
+    done
+    return 0
+}
+
+create_engine() {
+    read -p "Enter new engine name: " engine_name || return
+    if [ -z "$engine_name" ]; then
+        echo "Name cannot be empty."
+        return
+    fi
+    echo ""
+    echo "To create a Lichess API key, visit:"
+    echo "$TOKEN_URL"
+    read -p "Enter Lichess API key: " api_key || return
+    if [ -z "$api_key" ]; then
+        echo "API key cannot be empty."
+        return
+    fi
+    
+    # Generate a service name based on the engine name
+    local safe_name=$(echo "$engine_name" | tr -cd 'a-zA-Z0-9_-' | tr 'A-Z' 'a-z')
+    if [ -z "$safe_name" ]; then
+        safe_name="engine-$(date +%s)"
+    fi
+    local svc_name="lichess-engine-provider-$safe_name"
+    
+    echo "Creating engine..."
+    sudo LICHESS_API_TOKEN="$api_key" "$0" --name "$engine_name" --service-name "$svc_name"
+}
+
+remove_engine() {
+    local services=($(get_services))
+    if [ ${#services[@]} -eq 0 ]; then
+        echo "No engines found to remove."
+        return
+    fi
+    echo ""
+    echo "Current engines:"
+    list_engines
+    echo ""
+    read -p "Select engine to remove (1-${#services[@]}): " idx || return
+    if ! [[ "$idx" =~ ^[0-9]+$ ]] || [ "$idx" -lt 1 ] || [ "$idx" -gt "${#services[@]}" ]; then
+        echo "Invalid selection."
+        return
+    fi
+    local svc_file="${services[$((idx-1))]}"
+    local svc_name=$(basename "$svc_file" .service)
+    
+    echo "Removing $svc_name..."
+    sudo systemctl stop "$svc_name" 2>/dev/null || true
+    sudo systemctl disable "$svc_name" 2>/dev/null || true
+    sudo rm -f "$svc_file"
+    sudo rm -f "/etc/${svc_name}.env"
+    sudo systemctl daemon-reload
+    echo "Engine removed locally."
+    echo ""
+    echo "IMPORTANT: To fully remove the engine from Lichess, you must revoke its API key."
+    echo "Go to: https://lichess.org/account/oauth/token"
+    echo "and delete the token associated with this engine."
+}
+
+manage_engines() {
+    # Disable strict mode for the interactive wrapper to preserve original behavior
+    set +euo pipefail
+    while true; do
+        echo ""
+        echo "=== External Engine Manager ==="
+        echo "1. Create a new engine"
+        echo "2. List engines"
+        echo "3. Remove an engine"
+        echo "4. Exit"
+        read -p "Select an option (1-4): " opt || exit 0
+
+        case $opt in
+            1) create_engine ;;
+            2) list_engines ;;
+            3) remove_engine ;;
+            4) exit 0 ;;
+            *) echo "Invalid option." ;;
+        esac
+    done
+}
+
+if [ "$RUN_MANAGER" -eq 1 ]; then
+    manage_engines
+    exit 0
+fi
 
 # sudo only when we are not already root.
 SUDO=""
